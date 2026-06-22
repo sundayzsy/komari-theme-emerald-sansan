@@ -8,6 +8,8 @@ interface Props {
   status?: 'default' | 'success' | 'warning' | 'error' | 'info'
   height?: number | string
   class?: HTMLAttributes['class']
+  /** 自定义进度条填充样式（如渐变色），设置后将覆盖 status 颜色 */
+  barClass?: HTMLAttributes['class']
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -40,7 +42,7 @@ const statusClass = computed(() => {
   >
     <div
       class="h-full rounded-full transition-[width] duration-300 ease-out"
-      :class="statusClass"
+      :class="props.barClass ?? statusClass"
       :style="{ width: `${clamped}%` }"
     />
   </div>

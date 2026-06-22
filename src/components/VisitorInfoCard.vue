@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 interface VisitorGeoData {
   ip: string
@@ -39,9 +39,12 @@ const ip = ref('获取中')
 const isp = ref('获取中')
 const location = ref('正在定位访客来源')
 const countryCode = ref('')
-const visitTime = ref(formatVisitTime(new Date()))
+const currentTime = ref(formatVisitTime(new Date()))
 const flagVisible = ref(true)
 const expand = ref(false)
+
+/** 当前时间定时器 */
+let clockTimer: number | undefined
 
 const subtitle = computed(() => loading.value ? '检测中' : location.value || '网络访客')
 const flagSrc = computed(() => countryCode.value ? `/images/flags/${countryCode.value}.svg` : '')
@@ -70,9 +73,8 @@ const visitorRows = computed<VisitorInfoRow[]>(() => [
     expandOnly: true,
   },
   {
-    value: visitTime.value,
+    value: currentTime.value,
     icon: 'tabler:clock-hour-4',
-    expandOnly: true,
   },
 ])
 const visibleRows = computed(() => visitorRows.value.filter(item => expand.value || !item.expandOnly))
@@ -90,6 +92,7 @@ function formatVisitTime(date: Date): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false,
   }).format(date)
 }
@@ -243,7 +246,11 @@ onMounted(async () => {
   const client = detectClient()
   device.value = client.device
   browser.value = client.browser
-  visitTime.value = formatVisitTime(new Date())
+  currentTime.value = formatVisitTime(new Date())
+  // 每秒刷新当前时间
+  clockTimer = window.setInterval(() => {
+    currentTime.value = formatVisitTime(new Date())
+  }, 1000)
 
   const geo = await fetchVisitorGeo()
   if (geo) {
@@ -259,6 +266,11 @@ onMounted(async () => {
   }
 
   loading.value = false
+})
+
+onUnmounted(() => {
+  if (clockTimer !== undefined)
+    window.clearInterval(clockTimer)
 })
 </script>
 
