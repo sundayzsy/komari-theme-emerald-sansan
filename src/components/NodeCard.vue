@@ -14,7 +14,10 @@ import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getExpireTe
 
 const props = defineProps<{ node: NodeData }>()
 
-const emit = defineEmits<{ click: [] }>()
+const emit = defineEmits<{
+  click: []
+  pingClick: [node: NodeData]
+}>()
 
 const appStore = useAppStore()
 
@@ -116,6 +119,10 @@ const customTags = computed(() => parseTags(props.node.tags))
 
 function hasRegion(region: string | null | undefined): boolean {
   return Boolean(region?.trim())
+}
+
+function openPingDialog() {
+  emit('pingClick', props.node)
 }
 </script>
 
@@ -226,14 +233,23 @@ function hasRegion(region: string | null | undefined): boolean {
               </div>
 
               <!-- 延迟 -->
-              <div class="group/panel flex flex-col gap-1" :title="latencyPanelTooltip">
+              <div
+                role="button"
+                tabindex="0"
+                class="group/panel flex flex-col gap-1 cursor-pointer rounded-sm transition-colors hover:bg-slate-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                :title="latencyPanelTooltip"
+                :aria-label="`${props.node.name} 延迟`"
+                @click.stop="openPingDialog"
+                @keydown.enter.stop.prevent="openPingDialog"
+                @keydown.space.stop.prevent="openPingDialog"
+              >
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:activity" width="14" height="14" class="text-blue-500 shrink-0" />
                   <span class="font-semibold text-muted-foreground">延迟</span>
                   <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ latencyDisplay }}</span>
                 </div>
                 <div
-                  class="grid h-4 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100 cursor-auto"
+                  class="grid h-4 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
                   :style="{ gridTemplateColumns: `repeat(${latencyRenderBars.length}, minmax(0, 1fr))` }"
                 >
                   <DataTooltip v-for="bar in latencyRenderBars" :key="bar.key" placement="top" :content="bar.tooltip" class="h-full w-full">
@@ -297,14 +313,23 @@ function hasRegion(region: string | null | undefined): boolean {
               </div>
 
               <!-- 丢包 -->
-              <div class="group/panel flex flex-col gap-1" :title="lossPanelTooltip">
+              <div
+                role="button"
+                tabindex="0"
+                class="group/panel flex flex-col gap-1 cursor-pointer rounded-sm transition-colors hover:bg-slate-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                :title="lossPanelTooltip"
+                :aria-label="`${props.node.name} 丢包`"
+                @click.stop="openPingDialog"
+                @keydown.enter.stop.prevent="openPingDialog"
+                @keydown.space.stop.prevent="openPingDialog"
+              >
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:wifi" width="14" height="14" class="text-muted-foreground/70 shrink-0" />
                   <span class="font-semibold text-muted-foreground">丢包</span>
                   <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ lossDisplay }}</span>
                 </div>
                 <div
-                  class="grid h-4 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100 cursor-auto"
+                  class="grid h-4 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
                   :style="{ gridTemplateColumns: `repeat(${lossRenderBars.length}, minmax(0, 1fr))` }"
                 >
                   <DataTooltip v-for="bar in lossRenderBars" :key="bar.key" placement="top" :content="bar.tooltip" class="h-full w-full">
