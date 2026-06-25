@@ -11,13 +11,20 @@ import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
+import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getExpireTextClass, parseTags } from '@/utils/tagHelper'
 
 interface ColumnConfig {
   key: string
   label: string
   width: string | number
   sortable: boolean
+}
+
+interface PriceTagItem {
+  text: string
+  highlightValue?: string
+  prefix?: string
+  suffix?: string
 }
 
 const props = defineProps<{
@@ -190,21 +197,30 @@ function formatOfflineTime(node: NodeData): string {
   return formatDateTime(node.time)
 }
 
-function getPriceTags(node: NodeData): Array<string> {
-  const tags: Array<string> = []
+function getPriceTags(node: NodeData): PriceTagItem[] {
+  const tags: PriceTagItem[] = []
   const lang = appStore.lang
   if (node.price !== 0) {
     const days = getDaysUntilExpired(node.expired_at)
     const status = getExpireStatus(node.expired_at)
-    if (status === 'expired')
-      tags.push(lang === 'zh-CN' ? '已过期' : 'Expired')
-    else if (status === 'long_term')
-      tags.push(lang === 'zh-CN' ? '长期' : 'Long-term')
-    else tags.push(lang === 'zh-CN' ? `剩余 ${days} 天` : `${days} days left`)
     const priceText = formatPriceWithCycle(node.price, node.billing_cycle, node.currency, lang)
-    tags.push(priceText)
+    tags.push({ text: priceText })
+    if (status === 'expired')
+      tags.push({ text: lang === 'zh-CN' ? '已过期' : 'Expired' })
+    else if (status === 'long_term')
+      tags.push({ text: lang === 'zh-CN' ? '长期' : 'Long-term' })
+    else if (lang === 'zh-CN')
+      tags.push({ text: `剩余 ${days} 天`, prefix: '剩余 ', highlightValue: String(days), suffix: ' 天' })
+    else
+      tags.push({ text: `${days} days left`, highlightValue: String(days), suffix: ' days left' })
   }
   return tags
+}
+
+function getRemainingTimeTagClass(node: NodeData): string {
+  if (node.price === 0)
+    return ''
+  return getExpireTextClass(node.expired_at)
 }
 
 function getCustomTags(node: NodeData): Array<string> {
@@ -268,8 +284,15 @@ function getCustomTags(node: NodeData): Array<string> {
                   v-if="getPriceTags(node).length > 0"
                   class="text-[11px] text-muted-foreground/70 truncate"
                 >
-                  <span v-for="(tag, tagIndex) in getPriceTags(node)" :key="tagIndex" :class="!!tagIndex && 'ml-3'">
-                    {{ tag }}
+                  <span v-for="(tag, tagIndex) in getPriceTags(node)" :key="tagIndex" :class="[!!tagIndex && 'ml-1']">
+                    <template v-if="tag.highlightValue">
+                      <span>{{ tag.prefix }}</span>
+                      <span :class="getRemainingTimeTagClass(node)">{{ tag.highlightValue }}</span>
+                      <span>{{ tag.suffix }}</span>
+                    </template>
+                    <template v-else>
+                      {{ tag.text }}
+                    </template>
                   </span>
                 </div>
               </div>
@@ -332,20 +355,32 @@ function getCustomTags(node: NodeData): Array<string> {
 
               <!-- 内存 -->
               <div v-else-if="col.key === 'mem'" class="group">
-                <div class="space-y-1">
-                  <div class="text-[10px] text-muted-foreground truncate">
-                    <span class="inline group-hover:hidden">
-                      {{ ((node.ram ?? 0) / (node.mem_total || 1) * 100).toFixed(1) }}%
-                    </span>
-                    <span class="hidden group-hover:inline">
-                      {{ formatBytes(node.ram ?? 0) }} / {{ formatBytes(node.mem_total ?? 0) }}
-                    </span>
+                <DataTooltip placement="top" class="block" content-class="px-1.5 py-1 text-[10px]">
+                  <div class="space-y-1">
+                    <div class="text-[10px] text-muted-foreground truncate">
+                      <span class="inline group-hover:hidden">
+                        {{ ((node.ram ?? 0) / (node.mem_total || 1) * 100).toFixed(1) }}%
+                      </span>
+                      <span class="hidden group-hover:inline">
+                        {{ formatBytes(node.ram ?? 0) }} / {{ formatBytes(node.mem_total ?? 0) }}
+                      </span>
+                    </div>
+                    <ProgressThin
+                      :percentage="(node.ram ?? 0) / (node.mem_total || 1) * 100"
+                      :status="getStatus((node.ram ?? 0) / (node.mem_total || 1) * 100)" :height="4"
+                    />
                   </div>
-                  <ProgressThin
-                    :percentage="(node.ram ?? 0) / (node.mem_total || 1) * 100"
-                    :status="getStatus((node.ram ?? 0) / (node.mem_total || 1) * 100)" :height="4"
-                  />
-                </div>
+                  <template #content>
+                    <div class="flex items-center justify-between gap-3 whitespace-nowrap">
+                      <span class="text-background/70">USED</span>
+                      <span>{{ formatBytes(node.ram ?? 0) }}</span>
+                    </div>
+                    <div v-if="node.swap" class="flex items-center justify-between gap-3 whitespace-nowrap">
+                      <span class="text-background/70">SWAP</span>
+                      <span>{{ formatBytes(node.swap ?? 0) }}</span>
+                    </div>
+                  </template>
+                </DataTooltip>
               </div>
 
               <!-- 硬盘 -->
