@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { COBEOptions, Globe, Marker } from 'cobe'
+import type { ComponentPublicInstance } from 'vue'
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
 import {
   useDocumentVisibility,
   useElementSize,
@@ -13,15 +13,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getCoordByCode, getCountryCodeFromRegion } from '@/utils/geoHelper'
-import { formatBytesPerSecondSplit } from '@/utils/helper'
 
 const props = defineProps<{
   nodes?: NodeData[]
 }>()
+
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
 
-const displayNodes = computed(() => props.nodes ?? nodesStore.nodes)
+const displayNodes = computed(() => props.nodes ?? nodesStore.earthNodes)
 
 const containerRef = ref<HTMLDivElement>()
 const canvasRef = ref<HTMLCanvasElement>()
@@ -87,9 +87,8 @@ function shouldKeepStaticRedraw(): boolean {
 // 减少高采样导致的性能问题
 function getCappedDpr(): number {
   if (typeof window === 'undefined')
-    return 1.5
-  const raw = window.devicePixelRatio || 1
-  return Math.min(Math.max(raw, 1.5), 2)
+    return 1
+  return Math.min(window.devicePixelRatio || 1, 2)
 }
 
 interface RegionCluster {
@@ -126,43 +125,8 @@ const regionClusters = computed<RegionCluster[]>(() => {
   return Array.from(map.values()).sort((a, b) => b.servers - a.servers)
 })
 
-interface RegionRate {
-  up: number
-  down: number
-}
-
-const regionRates = computed<Map<string, RegionRate>>(() => {
-  const map = new Map<string, RegionRate>()
-  for (const node of displayNodes.value) {
-    if (!node.online)
-      continue
-    const code = getCountryCodeFromRegion(node.region)
-    if (!code)
-      continue
-    let entry = map.get(code)
-    if (!entry) {
-      entry = { up: 0, down: 0 }
-      map.set(code, entry)
-    }
-    entry.up += node.net_out || 0
-    entry.down += node.net_in || 0
-  }
-  return map
-})
-
 const clusterOverlayEls = new Map<string, HTMLDivElement>()
-
-function setClusterOverlayEl(code: string, el: unknown) {
-  if (el instanceof HTMLDivElement) {
-    el.style.transform = 'translate3d(0px, 0px, 0)'
-    el.style.opacity = '0'
-    el.style.filter = 'blur(20px)'
-    el.style.willChange = 'transform, opacity, filter'
-    clusterOverlayEls.set(code, el)
-    return
-  }
-  clusterOverlayEls.delete(code)
-}
+const clusterOverlayRefBinders = new Map<string, (el: Element | ComponentPublicInstance | null) => void>()
 
 function coordToGlobePoint([lat, lon]: [number, number]): [number, number, number] {
   const latRad = lat * Math.PI / 180
@@ -183,10 +147,13 @@ function getRenderSize() {
 
 // iOS Safari 对 cobe 内部 marker anchor 的 DOM/style 行为不稳定，
 // overlay 改为组件内自行投影定位，避免回落到容器左上角。
-function syncClusterOverlayPositions() {
+function syncClusterOverlayPosition(cluster: RegionCluster, el: HTMLDivElement) {
   const { width, height } = getRenderSize()
-  if (width <= 0 || height <= 0)
+  if (width <= 0 || height <= 0) {
+    el.style.opacity = '0'
+    el.style.filter = 'blur(20px)'
     return
+  }
 
   const aspect = width / height
   const cosTheta = Math.cos(theta)
@@ -195,29 +162,60 @@ function syncClusterOverlayPositions() {
   const sinPhi = Math.sin(phi)
   const markerRadius = GLOBE_RADIUS + MARKER_ELEVATION
   const visibleThreshold = GLOBE_RADIUS * GLOBE_RADIUS
+  const [baseX, baseY, baseZ] = coordToGlobePoint(cluster.coord)
+  const x = baseX * markerRadius
+  const y = baseY * markerRadius
+  const z = baseZ * markerRadius
+  const screenX = cosPhi * x + sinPhi * z
+  const screenY = sinPhi * sinTheta * x + cosTheta * y - cosPhi * sinTheta * z
+  const visible = (
+    -sinPhi * cosTheta * x + sinTheta * y + cosPhi * cosTheta * z >= 0
+    || screenX * screenX + screenY * screenY >= visibleThreshold
+  )
+  const xPx = ((screenX / aspect) * GLOBE_SCALE + 1) * width / 2
+  const yPx = ((-screenY) * GLOBE_SCALE + 1) * height / 2
 
+  el.style.transform = `translate3d(${xPx}px, ${yPx}px, 0)`
+  el.style.opacity = visible ? '1' : '0'
+  el.style.filter = visible ? 'blur(0px)' : 'blur(20px)'
+}
+
+function syncClusterOverlayPositions() {
   for (const cluster of regionClusters.value) {
     const el = clusterOverlayEls.get(cluster.code)
     if (!el)
       continue
-
-    const [baseX, baseY, baseZ] = coordToGlobePoint(cluster.coord)
-    const x = baseX * markerRadius
-    const y = baseY * markerRadius
-    const z = baseZ * markerRadius
-    const screenX = cosPhi * x + sinPhi * z
-    const screenY = sinPhi * sinTheta * x + cosTheta * y - cosPhi * sinTheta * z
-    const visible = (
-      -sinPhi * cosTheta * x + sinTheta * y + cosPhi * cosTheta * z >= 0
-      || screenX * screenX + screenY * screenY >= visibleThreshold
-    )
-    const xPx = ((screenX / aspect) * GLOBE_SCALE + 1) * width / 2
-    const yPx = ((-screenY) * GLOBE_SCALE + 1) * height / 2
-
-    el.style.transform = `translate3d(${xPx}px, ${yPx}px, 0)`
-    el.style.opacity = visible ? '1' : '0'
-    el.style.filter = visible ? 'blur(0px)' : 'blur(20px)'
+    syncClusterOverlayPosition(cluster, el)
   }
+}
+
+function setClusterOverlayEl(code: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLDivElement) {
+    el.style.willChange = 'transform, opacity, filter'
+    clusterOverlayEls.set(code, el)
+
+    const cluster = regionClusters.value.find(item => item.code === code)
+    if (cluster) {
+      syncClusterOverlayPosition(cluster, el)
+    }
+    else {
+      el.style.opacity = '0'
+      el.style.filter = 'blur(20px)'
+    }
+    return
+  }
+
+  clusterOverlayEls.delete(code)
+}
+
+function bindClusterOverlayRef(code: string): (el: Element | ComponentPublicInstance | null) => void {
+  const existingBinder = clusterOverlayRefBinders.get(code)
+  if (existingBinder)
+    return existingBinder
+
+  const binder = (el: Element | ComponentPublicInstance | null) => setClusterOverlayEl(code, el)
+  clusterOverlayRefBinders.set(code, binder)
+  return binder
 }
 
 const markers = computed<Marker[]>(() => {
@@ -297,8 +295,22 @@ const { pause: pauseRaf, resume: resumeRaf } = useRafFn(
     }
     updateGlobeFrame()
   },
-  { immediate: false /* fpsLimit: 60 */ },
+  { immediate: false }, // , fpsLimit: 30
 )
+
+function syncRafState() {
+  if (!globe)
+    return
+
+  if (shouldRender.value && (shouldAutoRotate.value || isPointerDown)) {
+    resumeRaf()
+    return
+  }
+
+  pauseRaf()
+  if (shouldRender.value)
+    updateGlobeFrame()
+}
 
 function startGlobe() {
   if (!canvasRef.value)
@@ -315,8 +327,7 @@ function startGlobe() {
   })
   // documentVisibility 同步可读；useElementVisibility 需等 IntersectionObserver 首回调
   // 先按"前台"启动，若实际不可见，shouldRender 的 watch 会在下一帧 pause
-  if (documentVisibility.value === 'visible')
-    resumeRaf()
+  syncRafState()
 }
 
 // cobe 不会清理自己创建的 wrapper，这里手动收尾。
@@ -356,8 +367,6 @@ watch(
   ([width, height]) => {
     if (!globe || width <= 0 || height <= 0)
       return
-    if (!shouldAutoRotate.value)
-      triggerStaticRedrawWindow(600)
     updateGlobeFrame()
   },
 )
@@ -368,7 +377,7 @@ watch(
     if (mode === 'earth-stop')
       resetStoppedView()
     triggerStaticRedrawWindow()
-    updateGlobeFrame()
+    syncRafState()
   },
 )
 
@@ -386,17 +395,10 @@ watch(
   },
 )
 
-watch(shouldRender, (visible) => {
+watch(shouldRender, () => {
   if (!globe)
     return
-  if (visible) {
-    if (!shouldAutoRotate.value)
-      triggerStaticRedrawWindow()
-    resumeRaf()
-  }
-  else {
-    pauseRaf()
-  }
+  syncRafState()
 })
 
 function onPointerDown(e: PointerEvent) {
@@ -405,6 +407,7 @@ function onPointerDown(e: PointerEvent) {
   lastPointerY = e.clientY
   const target = e.currentTarget as HTMLElement
   target.setPointerCapture(e.pointerId)
+  syncRafState()
 }
 function onPointerMove(e: PointerEvent) {
   if (!isPointerDown)
@@ -421,20 +424,12 @@ function onPointerUp(e: PointerEvent) {
   const target = e.currentTarget as HTMLElement
   if (target.hasPointerCapture(e.pointerId))
     target.releasePointerCapture(e.pointerId)
+  syncRafState()
 }
 
 const totalServers = computed(() => displayNodes.value.length)
 const onlineServers = computed(() => displayNodes.value.filter(node => node.online).length)
 const offlineServers = computed(() => totalServers.value - onlineServers.value)
-
-function rateFor(code: string): RegionRate {
-  return regionRates.value.get(code) ?? { up: 0, down: 0 }
-}
-
-function formatRate(bytesPerSec: number): string {
-  const { value, unit } = formatBytesPerSecondSplit(bytesPerSec, appStore.byteDecimals)
-  return `${value} ${unit}`
-}
 </script>
 
 <template>
@@ -447,21 +442,21 @@ function formatRate(bytesPerSec: number): string {
 
     <template v-for="cluster in regionClusters" :key="cluster.code">
       <div
-        :ref="el => setClusterOverlayEl(cluster.code, el)"
-        class="absolute -top-7.5 left-0 pointer-events-none rounded backdrop-blur-sm transition-[opacity,filter] duration-500"
+        :ref="bindClusterOverlayRef(cluster.code)"
+        class="absolute -top-3.5 left-0 pointer-events-none rounded backdrop-blur-sm transition-[opacity,filter] duration-500"
       >
         <img
           :src="`/images/flags/${cluster.code}.svg`" :alt="cluster.code"
           class="size-4 block absolute -bottom-2 -left-2 z-1"
         >
-        <div
-          class="relative z-2 bg-background/60 rounded py-0.5 px-1 text-xs zoom-80 items-start justify-center text-nowrap"
-        >
-          <div class="text-green-600 flex flex-row items-center gap-0.5">
-            <Icon icon="tabler:chevron-up" width="12" height="12" /> {{ formatRate(rateFor(cluster.code).up) }}
+        <div class="relative z-2 bg-background/60 rounded py-0.5 px-2 text-xs zoom-80 items-start justify-center text-nowrap">
+          <div v-if="cluster.onlineServers > 0" class="flex items-center gap-1">
+            <span class="inline-block size-1.5 rounded-full bg-green-600" />
+            <span class="text-green-600">{{ cluster.onlineServers }}</span>
           </div>
-          <div class="text-blue-600 flex flex-row items-center gap-0.5">
-            <Icon icon="tabler:chevron-down" width="12" height="12" /> {{ formatRate(rateFor(cluster.code).down) }}
+          <div v-if="(cluster.servers - cluster.onlineServers) > 0" class="flex items-center gap-1">
+            <span class="inline-block size-1.5 rounded-full bg-yellow-600" />
+            <span class="text-yellow-600">{{ cluster.servers - cluster.onlineServers }}</span>
           </div>
         </div>
       </div>

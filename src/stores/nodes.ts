@@ -1,4 +1,4 @@
-import type { Client, NodeStatus } from '@/utils/rpc'
+import type { Client, NodeStatus, NodeStatusPing } from '@/utils/rpc'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { parseNodeGroups } from '@/utils/groupHelper'
@@ -60,6 +60,7 @@ export interface NodeData {
   connections: number
   connections_udp: number
   uptime: number
+  ping?: Record<string, NodeStatusPing>
 }
 
 /** WebSocket 连接状态 */
@@ -86,13 +87,18 @@ interface StatusData {
   connections: number
   connections_udp: number
   uptime: number
+  ping?: Record<string, NodeStatusPing>
 }
+
+const EARTH_SNAPSHOT_INTERVAL_MS = 60_000
 
 const useNodesStore = defineStore('nodes', () => {
   // ===== 状态 =====
   const nodes = ref<NodeData[]>([])
+  const earthNodes = ref<NodeData[]>([])
   const wsConnectionState = ref<WsConnectionState>('disconnected')
   const wsReconnectAttempts = ref<number>(0)
+  let lastEarthSnapshotAt = 0
 
   // ===== 计算属性 =====
   /** 在线节点数量 */
@@ -177,6 +183,7 @@ const useNodesStore = defineStore('nodes', () => {
       connections: 0,
       connections_udp: 0,
       uptime: 0,
+      ping: undefined,
     }
   }
 
@@ -205,6 +212,7 @@ const useNodesStore = defineStore('nodes', () => {
       connections: status.connections,
       connections_udp: status.connections_udp,
       uptime: status.uptime,
+      ping: status.ping,
     }
   }
 
@@ -233,6 +241,18 @@ const useNodesStore = defineStore('nodes', () => {
       connections_udp: status.connections_udp,
       uptime: status.uptime,
     }
+  }
+
+  /**
+   * Earth 视图共享采样快照，避免 globe / maps 各自维护定时器。
+   */
+  function refreshEarthNodes(force = false): void {
+    const now = Date.now()
+    if (!force && now - lastEarthSnapshotAt < EARTH_SNAPSHOT_INTERVAL_MS)
+      return
+
+    earthNodes.value = [...nodes.value]
+    lastEarthSnapshotAt = now
   }
 
   /**
@@ -279,6 +299,7 @@ const useNodesStore = defineStore('nodes', () => {
 
     // 按 weight 降序排序（weight 越大越靠前）
     sortNodesByWeight()
+    refreshEarthNodes(true)
   }
 
   /**
@@ -292,6 +313,8 @@ const useNodesStore = defineStore('nodes', () => {
    * 更新节点状态（实时更新）
    */
   function updateNodeStatuses(statuses: Record<string, NodeStatus>): void {
+    let hasChanges = false
+
     Object.entries(statuses).forEach(([uuid, status]) => {
       const index = nodes.value.findIndex(n => n.uuid === uuid)
       if (index === -1)
@@ -302,7 +325,11 @@ const useNodesStore = defineStore('nodes', () => {
         return
 
       nodes.value[index] = updateNodeStatus(node, extractStatusData(status))
+      hasChanges = true
     })
+
+    if (hasChanges)
+      refreshEarthNodes()
   }
 
   /**
@@ -342,6 +369,7 @@ const useNodesStore = defineStore('nodes', () => {
           connections: currentNode.connections,
           connections_udp: currentNode.connections_udp,
           uptime: currentNode.uptime,
+          ping: currentNode.ping,
         })
       }
       else {
@@ -360,6 +388,7 @@ const useNodesStore = defineStore('nodes', () => {
 
     // 按 weight 降序排序
     sortNodesByWeight()
+    refreshEarthNodes(true)
   }
 
   /**
@@ -377,11 +406,13 @@ const useNodesStore = defineStore('nodes', () => {
    */
   function clearNodes(): void {
     nodes.value = []
+    refreshEarthNodes(true)
   }
 
   return {
     // 状态
     nodes,
+    earthNodes,
     wsConnectionState,
     wsReconnectAttempts,
     // 计算属性
