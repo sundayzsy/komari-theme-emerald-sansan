@@ -43,3 +43,5 @@ __screenshots__/
 # Theme build output
 komari-theme-*.zip
 bun.lock
+.kiro
+.trellis

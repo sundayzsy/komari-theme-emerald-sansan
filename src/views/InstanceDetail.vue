@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CurrencyCode } from '@/utils/financeHelper'
 import { Icon } from '@iconify/vue'
+import { useClipboard } from '@vueuse/core'
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Badge } from '@/components/ui/badge'
@@ -39,6 +40,32 @@ const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(b
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'minute')
 
 const data = computed(() => nodesStore.nodes.find(node => node.uuid === route.params.id))
+
+/** IP 拆分正则（模块作用域，避免重复编译；支持空格/逗号/分号分隔多个 IP） */
+const IP_SPLIT_REGEX = /[\s,;]+/
+
+const { copy: copyToClipboard } = useClipboard()
+
+function splitIps(value: string | undefined | null): string[] {
+  if (!value)
+    return []
+  return value.split(IP_SPLIT_REGEX).map(item => item.trim()).filter(Boolean)
+}
+
+const ipv4List = computed(() => splitIps(data.value?.ipv4))
+const ipv6List = computed(() => splitIps(data.value?.ipv6))
+/** 仅在登录且至少存在一个 IP 时显示 IP 信息卡片 */
+const showIpCard = computed(() => appStore.isLoggedIn && (ipv4List.value.length > 0 || ipv6List.value.length > 0))
+
+async function copyIp(ip: string) {
+  try {
+    await copyToClipboard(ip)
+    window.$message.success(appStore.lang === 'zh-CN' ? '已复制' : 'Copied')
+  }
+  catch {
+    window.$message.error(appStore.lang === 'zh-CN' ? '复制失败' : 'Copy failed')
+  }
+}
 
 interface InfoItem {
   label: string
@@ -396,6 +423,51 @@ const trafficProgressStyle = computed(() => ({
                 <Icon icon="tabler:chevron-down" width="12" height="12" />
                 {{ formatBytesPerSecond(data?.net_in ?? 0) }}
               </span>
+            </div>
+          </div>
+        </CardX>
+      </div>
+
+      <!-- IP 信息（仅登录且存在 IP 时整卡显示） -->
+      <div v-if="showIpCard" class="px-4">
+        <CardX
+          title="IP 信息" size="small"
+          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+        >
+          <div class="gap-3 grid grid-cols-1 sm:grid-cols-2">
+            <!-- IPv4 -->
+            <div class="min-w-0 flex flex-col gap-1.5 rounded-sm bg-slate-500/5 p-2">
+              <span class="w-fit text-[10px] font-semibold leading-[1.4] px-1.5 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/20">IPv4</span>
+              <div v-if="ipv4List.length" class="flex flex-col gap-1">
+                <div v-for="(ip, index) in ipv4List" :key="index" class="flex items-center gap-2">
+                  <span class="font-mono text-xs sm:text-sm break-all flex-1 min-w-0">{{ ip }}</span>
+                  <button
+                    type="button" title="复制"
+                    class="shrink-0 text-slate-500 hover:text-foreground transition-colors"
+                    @click="copyIp(ip)"
+                  >
+                    <Icon icon="tabler:copy" :width="14" :height="14" />
+                  </button>
+                </div>
+              </div>
+              <span v-else class="text-xs text-muted-foreground">-</span>
+            </div>
+            <!-- IPv6 -->
+            <div class="min-w-0 flex flex-col gap-1.5 rounded-sm bg-slate-500/5 p-2">
+              <span class="w-fit text-[10px] font-semibold leading-[1.4] px-1.5 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/20">IPv6</span>
+              <div v-if="ipv6List.length" class="flex flex-col gap-1">
+                <div v-for="(ip, index) in ipv6List" :key="index" class="flex items-center gap-2">
+                  <span class="font-mono text-xs sm:text-sm break-all flex-1 min-w-0">{{ ip }}</span>
+                  <button
+                    type="button" title="复制"
+                    class="shrink-0 text-slate-500 hover:text-foreground transition-colors"
+                    @click="copyIp(ip)"
+                  >
+                    <Icon icon="tabler:copy" :width="14" :height="14" />
+                  </button>
+                </div>
+              </div>
+              <span v-else class="text-xs text-muted-foreground">-</span>
             </div>
           </div>
         </CardX>

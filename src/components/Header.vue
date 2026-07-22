@@ -39,7 +39,7 @@ function handleButtonClick(action: string) {
       appStore.updateThemeMode()
       break
     case 'jumpToSetting':
-      location.href = '/admin'
+      window.open('/admin', '_blank', 'noopener,noreferrer')
       break
   }
 }
