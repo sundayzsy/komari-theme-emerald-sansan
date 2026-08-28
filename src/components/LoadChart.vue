@@ -10,6 +10,7 @@ import { CardX } from '@/components/ui/card-x'
 import { Empty } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useBackgroundSurface } from '@/composables/useBackgroundSurface'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
@@ -22,6 +23,7 @@ const props = defineProps<{
 }>()
 
 const appStore = useAppStore()
+const { pickSurfaceClass } = useBackgroundSurface()
 const nodesStore = useNodesStore()
 
 // 从 publicSettings 获取记录保留时间
@@ -81,7 +83,7 @@ const baseTooltipConfig = computed(() => ({
     fontSize: 12,
     lineHeight: 20,
   },
-  extraCssText: `backdrop-filter: blur(5px);z-index:9;box-shadow:0 0 0 1px ${chartThemeColors.value.tooltipShadow}, 0 0 16px ${chartThemeColors.value.tooltipShadow}`,
+  extraCssText: `${appStore.backgroundEnabled ? 'backdrop-filter: blur(5px);' : ''}z-index:9;box-shadow:0 0 0 1px ${chartThemeColors.value.tooltipShadow}, 0 0 16px ${chartThemeColors.value.tooltipShadow}`,
   axisPointer: {
     type: 'cross' as const,
     crossStyle: {
@@ -305,7 +307,7 @@ function formatTime(time: string, showDate: boolean): string {
   if (showDate) {
     return date.format('M/D HH:mm')
   }
-  return date.format('HH:mm')
+  return date.format(isRealtime.value ? 'HH:mm:ss' : 'HH:mm')
 }
 
 function formatTimeForTooltip(time: string, hours: number): string {
@@ -326,6 +328,7 @@ const baseXAxisConfig = computed(() => ({
     fontSize: 11,
     color: chartThemeColors.value.textSecondary,
     margin: 12,
+    hideOverlap: true,
   },
   axisLine: {
     show: true,
@@ -349,6 +352,11 @@ const baseYAxisConfig = computed(() => ({
       color: chartThemeColors.value.splitLineColor,
       type: 'dashed' as const,
     },
+  },
+  axisPointer: {
+    lineStyle: { opacity: 0 },
+    crossStyle: { opacity: 0 },
+    label: { show: false },
   },
 }))
 
@@ -575,7 +583,6 @@ const diskChartOption = computed(() => ({
       name: '磁盘已用',
       type: 'line',
       data: chartData.value.map(r => r.disk ?? 0),
-
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.tertiary, cap: 'round' as const },
       areaStyle: {
@@ -642,7 +649,7 @@ const networkChartOption = computed(() => ({
     nameTextStyle: { color: chartThemeColors.value.textSecondary, padding: [0, 40, 0, 0] },
     axisLabel: {
       ...baseYAxisConfig.value.axisLabel,
-      formatter: (val: number) => formatBytes(val),
+      formatter: (val: number) => `${formatBytes(val)}/s`,
     },
   },
   series: [
@@ -842,10 +849,10 @@ onMounted(() => {
   <div class="flex flex-col gap-4">
     <!-- 时间选择器 -->
     <Tabs v-model="selectedView" class="w-full items-center">
-      <TabsList class="h-8 bg-background/50 backdrop-blur-xl pointer-events-auto rounded-md">
+      <TabsList :class="pickSurfaceClass('h-8 bg-background/60 pointer-events-auto rounded-md', 'h-8 bg-background/50 backdrop-blur-xl pointer-events-auto rounded-md')">
         <TabsTrigger
           v-for="view in availableViews" :key="view.label" :value="view.label"
-          class="h-6.5 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+          class="h-6.5 text-xs border-none data-[state=active]:text-emerald-600 shadow-none rounded-sm"
         >
           {{ view.label }}
         </TabsTrigger>
@@ -864,7 +871,11 @@ onMounted(() => {
       <!-- 图表网格 -->
       <div v-else class="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         <!-- CPU 卡片 -->
-        <CardX size="small" class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+        <CardX
+          size="small"
+          class="border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+        >
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">CPU</span>
@@ -881,7 +892,11 @@ onMounted(() => {
         </CardX>
 
         <!-- 内存卡片 -->
-        <CardX size="small" class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+        <CardX
+          size="small"
+          class="border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+        >
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">内存</span>
@@ -907,7 +922,11 @@ onMounted(() => {
         </CardX>
 
         <!-- 磁盘卡片 -->
-        <CardX size="small" class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+        <CardX
+          size="small"
+          class="border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+        >
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">磁盘</span>
@@ -932,7 +951,11 @@ onMounted(() => {
         </CardX>
 
         <!-- 网络卡片 -->
-        <CardX size="small" class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+        <CardX
+          size="small"
+          class="border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+        >
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">网络</span>
@@ -962,7 +985,11 @@ onMounted(() => {
         </CardX>
 
         <!-- 连接数卡片 -->
-        <CardX size="small" class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+        <CardX
+          size="small"
+          class="border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+        >
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">连接</span>
@@ -979,7 +1006,11 @@ onMounted(() => {
         </CardX>
 
         <!-- 进程卡片 -->
-        <CardX size="small" class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+        <CardX
+          size="small"
+          class="border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+        >
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">进程</span>

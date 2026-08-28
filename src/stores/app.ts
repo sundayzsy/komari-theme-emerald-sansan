@@ -131,6 +131,8 @@ const useAppStore = defineStore('app', () => {
     return true
   })
 
+  const visitorCountryCode = ref<string | null>(null)
+
   const hideAdminEntryWhenLoggedOut = computed<boolean>(() => {
     const settings = publicSettings.value?.theme_settings
     if (settings && typeof settings.hideAdminEntryWhenLoggedOut === 'boolean') {
@@ -143,6 +145,33 @@ const useAppStore = defineStore('app', () => {
     const settings = publicSettings.value?.theme_settings
     if (settings && typeof settings.disablePageAnimation === 'boolean') {
       return settings.disablePageAnimation
+    }
+    return false
+  })
+
+  // 计算属性：三网延迟显示节点顺序（未配置时返回空数组，保持默认排序）
+  const pingNetworkOrder = computed<string[]>(() => {
+    const settings = publicSettings.value?.theme_settings
+    const raw = settings && typeof settings.pingNetworkOrder === 'string' ? settings.pingNetworkOrder : ''
+    const seen = new Set<string>()
+    const names: string[] = []
+
+    for (const item of raw.split(',')) {
+      const normalized = item.trim()
+      if (!normalized || seen.has(normalized))
+        continue
+      seen.add(normalized)
+      names.push(normalized)
+    }
+
+    return names
+  })
+
+  // 计算属性：离线节点后置（默认顺序下离线节点排到所有节点最后）
+  const offlineNodesLast = computed<boolean>(() => {
+    const settings = publicSettings.value?.theme_settings
+    if (settings && typeof settings.offlineNodesLast === 'boolean') {
+      return settings.offlineNodesLast
     }
     return false
   })
@@ -324,8 +353,11 @@ const useAppStore = defineStore('app', () => {
     alertContent,
     earthViewMode,
     visitorInfoCardEnabled,
+    visitorCountryCode,
     hideAdminEntryWhenLoggedOut,
     disablePageAnimation,
+    pingNetworkOrder,
+    offlineNodesLast,
     icpEnabled,
     icpNumber,
     icpUrl,

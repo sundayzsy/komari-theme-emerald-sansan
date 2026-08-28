@@ -15,13 +15,13 @@ Repo guide for `komari-theme-emerald`.
 - Builds a Komari theme, not a generic web app
 - Release artifact is a zip package Komari can import
 - Runtime app code lives under `src/`
-- Runtime static assets include `public/images/`
+- Flag and OS logo assets are **not** bundled; they resolve to `/assets/flags/<CODE>.svg` and `/assets/logo/*` served by the Komari host (see below)
 - Release preview image is `docs/preview.png`
 
 ## Root structure
 
 - `src/` app source
-- `public/images/` runtime image contract, especially flags and logos
+- `public/` runtime static root; contains only `favicon.ico`
 - `.github/` CI workflow and issue templates
 - `docs/preview.png` release preview image
 - `komari-theme.json` theme manifest consumed by the zip build
@@ -86,8 +86,8 @@ CI does not run tests, because there is no test suite.
 - Check `vite.config.ts` for build behavior, global constants, and zip packaging
 - Check `komari-theme.json` for theme metadata and managed configuration schema
 - Check `src/` for app behavior
-- Check `public/images/` when code references image filenames directly
-- Check `.github/workflows/build-ci.yml` for CI expectations
+- Check `src/utils/regionHelper.ts` (`getFlagSrc`) and `src/utils/osImageHelper.ts` when code references image paths
+- Check `.github/workflows/release-on-version-bump.yml` for CI expectations
 - Check `.github/ISSUE_TEMPLATE/` for issue intake shape
 
 Contributor density, useful for triage:
@@ -112,10 +112,9 @@ Contributor density, useful for triage:
 
 - Do not rename `komari-theme.json`
 - Do not move or rename `docs/preview.png` casually
-- Do not rename files under `public/images/flags/` or `public/images/logo/` without checking code references in `src`
-- Do not change asset path conventions like `/images/flags/<code>.svg` or `/images/logo/...` blindly
+- Do not re-add flag or OS logo files under `public/`. They are served by the Komari host at `/assets/flags/*` and `/assets/logo/*`, which the backend resolves by falling back to its embedded default theme (`web/public/public.go`). Always go through `getFlagSrc()` / `getOSImage()` instead of hardcoding paths.
 - Do not add generic framework advice here that belongs in `src/AGENTS.md`
-- Do not duplicate workflow specifics from `.github/AGENTS.md` or asset naming specifics from `public/images/AGENTS.md`
+- Do not duplicate workflow specifics from `.github/AGENTS.md`
 
 ## Child guides
 
@@ -123,6 +122,5 @@ For local rules, defer to the nearest child guide:
 
 - `src/AGENTS.md` for app code, component, store, router, and utility changes
 - `.github/AGENTS.md` for workflow and issue template changes
-- `public/images/AGENTS.md` for runtime image asset naming and compatibility rules
 
 If a child guide exists, it overrides this root file for its subtree.

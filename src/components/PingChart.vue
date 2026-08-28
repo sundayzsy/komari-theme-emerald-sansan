@@ -8,9 +8,10 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { Empty } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useBackgroundSurface } from '@/composables/useBackgroundSurface'
 import { useAppStore } from '@/stores/app'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
-import { getSharedRpc } from '@/utils/rpc'
+import { getSharedRpc, RpcError } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
@@ -18,6 +19,7 @@ const props = defineProps<{
 }>()
 
 const appStore = useAppStore()
+const { pickSurfaceClass } = useBackgroundSurface()
 const isDark = computed(() => appStore.isDark)
 // 使用共享的 RPC 实例，避免重复创建连接
 const rpc = getSharedRpc()
@@ -125,12 +127,52 @@ interface TaskInfo {
   type?: string
 }
 
+interface MetricPoint {
+  time: string
+  value: number | null
+  tags?: Record<string, string>
+  tag?: Record<string, string>
+}
+
+interface MetricSeries {
+  metric_key: 'ping.latency_ms' | 'ping.loss'
+  tags?: Record<string, string>
+  tag?: Record<string, string>
+  points: MetricPoint[]
+}
+
+interface MetricQueryResponse {
+  series: MetricSeries[]
+}
+
+interface PingMetricTaskStats {
+  task_id: string
+  name?: string
+  type?: string
+  interval?: number
+  loss: number
+  min?: number
+  max?: number
+  avg?: number
+  latest?: number
+  total: number
+  p50?: number
+  p99?: number
+  p99_p50_ratio?: number
+}
+
+interface PingMetricStatsResponse {
+  stats: PingMetricTaskStats[]
+}
+
 interface PingRecordsResponse {
-  count: number
   records: PingRecord[]
   tasks?: TaskInfo[]
-  from?: string
-  to?: string
+}
+
+interface PingChartData {
+  records: PingRecord[]
+  tasks: TaskInfo[]
 }
 
 // 数据状态
@@ -138,6 +180,8 @@ const remoteData = shallowRef<PingRecord[]>([])
 const tasks = shallowRef<TaskInfo[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+let fetchRequestId = 0
+let metricRpcSupported: boolean | null = null
 
 // 任务选择
 const selectedTaskIds = ref<number[]>([])
@@ -160,37 +204,147 @@ const mergeToleranceMs = computed(() => {
 
 // ==================== 数据获取 ====================
 
+function isMethodNotFoundError(err: unknown): boolean {
+  return err instanceof RpcError && err.code === -32601
+}
+
+function getMetricTaskId(series: MetricSeries, point: MetricPoint): number | null {
+  const taskId = Number(
+    point.tags?.task_id
+    ?? series.tags?.task_id
+    ?? point.tag?.task_id
+    ?? series.tag?.task_id,
+  )
+
+  return Number.isInteger(taskId) ? taskId : null
+}
+
+async function fetchMetricRecords(uuid: string, hours: number): Promise<PingChartData> {
+  const [metricResult, statsResult] = await Promise.all([
+    rpc.getClient().call<MetricQueryResponse>('public:queryMetrics', {
+      metric_keys: ['ping.latency_ms', 'ping.loss'],
+      entity_id: uuid,
+      hours,
+      downsample: true,
+      max_points: 500,
+      aggregation: 'avg',
+    }),
+    rpc.getClient().call<PingMetricStatsResponse>('public:getPingMetricStats', {
+      uuid,
+      hours,
+      max_points: 500,
+    }),
+  ])
+
+  const records: PingRecord[] = []
+  for (const series of metricResult?.series ?? []) {
+    for (const point of series.points ?? []) {
+      const taskId = getMetricTaskId(series, point)
+      if (taskId === null)
+        continue
+
+      if (point.value === null)
+        continue
+
+      if (series.metric_key === 'ping.loss' && point.value <= 0)
+        continue
+
+      records.push({
+        client: uuid,
+        task_id: taskId,
+        time: point.time,
+        value: series.metric_key === 'ping.loss' ? -1 : point.value,
+      })
+    }
+  }
+
+  const metricTasks = (statsResult?.stats ?? []).map(task => ({
+    id: Number(task.task_id),
+    name: task.name || `Ping ${task.task_id}`,
+    interval: task.interval ?? 60,
+    loss: task.loss,
+    p99: task.p99,
+    p50: task.p50,
+    p99_p50_ratio: task.p99_p50_ratio,
+    min: task.min,
+    max: task.max,
+    avg: task.avg,
+    latest: task.latest,
+    total: task.total,
+    type: task.type,
+  })).filter(task => Number.isInteger(task.id))
+
+  return { records, tasks: metricTasks }
+}
+
+async function fetchLegacyRecords(uuid: string, hours: number): Promise<PingChartData> {
+  const result = await rpc.getClient().call<PingRecordsResponse>('common:getRecords', {
+    type: 'ping',
+    uuid,
+    hours,
+  })
+
+  return {
+    records: result?.records ?? [],
+    tasks: result?.tasks ?? [],
+  }
+}
+
 async function fetchRecords() {
   if (!props.uuid)
     return
+
+  const requestId = ++fetchRequestId
+  const uuid = props.uuid
+  const hours = selectedHours.value
 
   loading.value = true
   error.value = null
 
   try {
-    const result = await rpc.getClient().call<PingRecordsResponse>('common:getRecords', {
-      uuid: props.uuid,
-      type: 'ping',
-      hours: selectedHours.value,
-    })
+    let result: PingChartData
+    if (metricRpcSupported === false) {
+      result = await fetchLegacyRecords(uuid, hours)
+    }
+    else {
+      try {
+        result = await fetchMetricRecords(uuid, hours)
+        metricRpcSupported = true
+      }
+      catch (err) {
+        if (!isMethodNotFoundError(err))
+          throw err
 
-    const records = result?.records || []
+        metricRpcSupported = false
+        result = await fetchLegacyRecords(uuid, hours)
+      }
+    }
+
+    if (requestId !== fetchRequestId)
+      return
+
+    const records = result.records
     records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
 
     remoteData.value = records
-    tasks.value = result?.tasks || []
+    tasks.value = result.tasks
 
     if (tasks.value.length > 0 && selectedTaskIds.value.length === 0) {
       selectedTaskIds.value = tasks.value.map(t => t.id)
     }
   }
   catch (err) {
+    if (requestId !== fetchRequestId)
+      return
+
     error.value = err instanceof Error ? err.message : '获取数据失败'
     remoteData.value = []
     tasks.value = []
   }
   finally {
-    loading.value = false
+    if (requestId === fetchRequestId) {
+      loading.value = false
+    }
   }
 }
 
@@ -543,6 +697,11 @@ const pingChartOption = computed(() => {
       axisLabel: { fontSize: 11, color: chartThemeColors.value.textSecondary, formatter: '{value}' },
       axisLine: { show: false },
       axisTick: { show: false },
+      axisPointer: {
+        lineStyle: { opacity: 0 },
+        crossStyle: { opacity: 0 },
+        label: { show: false },
+      },
       splitLine: {
         lineStyle: {
           color: chartThemeColors.value.splitLineColor,
@@ -581,11 +740,11 @@ onMounted(() => {
   <div class="flex flex-col gap-4">
     <!-- 时间选择器 -->
     <Tabs v-model="selectedView" class="w-full items-center">
-      <div class="min-w-0 flex-1 overflow-x-auto rounded-sm pointer-events-auto">
-        <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md">
+      <div class="min-w-0 flex-1 overflow-x-auto pointer-events-auto">
+        <TabsList :class="pickSurfaceClass('w-max h-8 bg-background/60 rounded-md', 'w-max h-8 bg-background/50 backdrop-blur-xl rounded-md')">
           <TabsTrigger
             v-for="view in availableViews" :key="view.label" :value="view.label"
-            class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+            class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-emerald-600 shadow-none rounded-sm"
           >
             {{ view.label }}
           </TabsTrigger>
@@ -594,15 +753,15 @@ onMounted(() => {
       <div class="md:flex-1" />
       <div class="flex gap-2 items-center">
         <Button
-          variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-          :class="selectedTaskIds.length === tasks.length ? 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600' : ''"
+          variant="ghost" size="xs" class="h-7 rounded-sm border-none bg-background/60 hover:bg-background"
+          :class="[selectedTaskIds.length === tasks.length && 'bg-background !text-emerald-600']"
           @click="showAllTasks"
         >
           全选
         </Button>
         <Button
-          variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-          :class="!selectedTaskIds.length && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'"
+          variant="ghost" size="xs" class="h-7 rounded-sm border-none bg-background/60 hover:bg-background"
+          :class="[!selectedTaskIds.length && 'bg-background !text-emerald-600']"
           @click="hideAllTasks"
         >
           全不选
@@ -627,8 +786,10 @@ onMounted(() => {
         >
           <div
             v-for="task in latestValues" :key="task.id"
-            class="p-2 rounded-md bg-background/50 hover:bg-background hover:shadow-[0_0_0_2px] hover:shadow-primary/10 flex gap-3 cursor-pointer select-none transition-all items-center"
-            :class="[!selectedTaskIds.includes(task.id) && 'opacity-30']"
+            class="flex cursor-pointer select-none items-center gap-3 rounded-md p-2 transition-all bg-background/60 hover:bg-background hover:shadow-[0_0_0_1px] hover:shadow-emerald-600/10"
+            :class="[
+              !selectedTaskIds.includes(task.id) && 'opacity-30',
+            ]"
             :onmouseover="(e: MouseEvent) => ((e.currentTarget as HTMLElement).style.borderColor = task.color)"
             :onmouseout="(e: MouseEvent) => ((e.currentTarget as HTMLElement).style.borderColor = '')"
             @click="toggleTask(task.id)"
@@ -638,7 +799,7 @@ onMounted(() => {
                 <div class="rounded h-4 w-1" :style="{ backgroundColor: task.color }" />
                 <span class="text-sm font-semibold truncate">{{ task.name }}</span>
                 <div class="flex-1" />
-                <DataTooltip placement="left" content-class="!rounded p-3 w-60 backdrop-blur-xs">
+                <DataTooltip placement="left" content-class="!rounded p-3 w-60 backdrop-blur">
                   <Button variant="ghost" size="icon-xs" class="text-slate-500" @click.stop>
                     <Icon icon="carbon:information" :width="14" :height="14" />
                   </Button>
@@ -706,27 +867,31 @@ onMounted(() => {
         <div class="flex flex-wrap gap-2 items-center py-2">
           <!-- 延迟可视化开关 -->
           <Button
-            variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-            :class="showDelay && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'" @click="showDelay = !showDelay"
+            variant="ghost" size="xs" class="h-7 rounded-sm border-none bg-background/60 hover:bg-background"
+            :class="[showDelay && 'bg-background !text-emerald-600']" @click="showDelay = !showDelay"
           >
             延迟
           </Button>
           <!-- 丢包可视化开关 -->
           <Button
-            variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-            :class="showLoss && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'" @click="showLoss = !showLoss"
+            variant="ghost" size="xs" class="h-7 rounded-sm border-none bg-background/60 hover:bg-background"
+            :class="[showLoss && 'bg-background !text-emerald-600']" @click="showLoss = !showLoss"
           >
             丢包
           </Button>
           <!-- 平滑峰值开关 -->
           <div class="flex gap-2 items-center">
             <Button
-              variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-              :class="cutPeak && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'" @click="cutPeak = !cutPeak"
+              variant="ghost" size="xs" class="h-7 rounded-sm border-none bg-background/60 hover:bg-background"
+              :class="[cutPeak && 'bg-background !text-emerald-600']" @click="cutPeak = !cutPeak"
             >
               平滑峰值
             </Button>
-            <DataTooltip content="使用 EWMA 算法平滑数据并过滤突变值" placement="top" content-class="whitespace-nowrap text-[11px] backdrop-blur-xl">
+            <DataTooltip
+              content="使用 EWMA 算法平滑数据并过滤突变值"
+              placement="top"
+              :content-class="pickSurfaceClass('whitespace-nowrap text-[11px]', 'whitespace-nowrap text-[11px] backdrop-blur-xl')"
+            >
               <Button variant="ghost" size="icon-xs" class="text-slate-500">
                 <Icon icon="carbon:information" :width="14" :height="14" />
               </Button>
@@ -735,7 +900,10 @@ onMounted(() => {
         </div>
 
         <!-- 图表 -->
-        <div class="h-80 bg-background/50 backdrop-blur-xl hover:bg-background p-4 rounded-md transition-all">
+        <div
+          class="h-80 rounded-md p-4 transition-all"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xl')"
+        >
           <VChart :option="pingChartOption" autoresize />
         </div>
       </template>

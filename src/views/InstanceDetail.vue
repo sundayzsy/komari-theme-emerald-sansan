@@ -8,12 +8,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Empty } from '@/components/ui/empty'
+import { useBackgroundSurface } from '@/composables/useBackgroundSurface'
+import { useNodeFormatters } from '@/composables/useNodeFormatters'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
-import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat } from '@/utils/helper'
+import { formatDateTime } from '@/utils/helper'
+import { getTrafficUsed } from '@/utils/nodeHelpers'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
-import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { getFlagSrc, getRegionDisplayName } from '@/utils/regionHelper'
 import { getBillingCycleText, getExpireText, getExpireTextClass } from '@/utils/tagHelper'
 
 const LoadChart = defineAsyncComponent(() => import('@/components/LoadChart.vue'))
@@ -23,7 +26,9 @@ const route = useRoute()
 const router = useRouter()
 
 const appStore = useAppStore()
+const { pickSurfaceClass } = useBackgroundSurface()
 const nodesStore = useNodesStore()
+const { formatBytes, formatBytesPerSecond, formatUptime } = useNodeFormatters()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const financeBaseCurrency = ref<CurrencyCode>('CNY')
 
@@ -34,10 +39,6 @@ onMounted(async () => {
   const { rates } = await financeHelper.getDailyExchangeRates()
   exchangeRates.value = rates
 })
-
-const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
-const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
-const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'minute')
 
 const data = computed(() => nodesStore.nodes.find(node => node.uuid === route.params.id))
 
@@ -210,7 +211,7 @@ const hardwareInfo = computed<InfoItem[]>(() => [
 const systemInfo = computed<InfoItem[]>(() => [
   { label: '操作系统', value: data.value?.os ?? '-', icon: 'icon-park-outline:computer' },
   { label: '内核版本', value: data.value?.kernel_version ?? '-', icon: 'icon-park-outline:code' },
-  { label: '运行时间', value: formatUptime(data.value?.uptime ?? 0), icon: 'icon-park-outline:timer' },
+  { label: '运行时间', value: formatUptime(data.value?.uptime ?? 0, 'minute'), icon: 'icon-park-outline:timer' },
   { label: '最后上报', value: formatDateTime(data.value?.time), icon: 'icon-park-outline:time' },
 ])
 
@@ -221,24 +222,9 @@ const storageInfo = computed<InfoItem[]>(() => [
 ])
 
 const trafficUsed = computed(() => {
-  const node = data.value
-  if (!node)
+  if (!data.value)
     return 0
-
-  const { net_total_up = 0, net_total_down = 0, traffic_limit_type } = node
-  switch (traffic_limit_type) {
-    case 'up':
-      return net_total_up
-    case 'down':
-      return net_total_down
-    case 'min':
-      return Math.min(net_total_up, net_total_down)
-    case 'max':
-      return Math.max(net_total_up, net_total_down)
-    case 'sum':
-    default:
-      return net_total_up + net_total_down
-  }
+  return getTrafficUsed(data.value)
 })
 
 const hasTrafficLimit = computed(() => (data.value?.traffic_limit ?? 0) > 0)
@@ -266,7 +252,10 @@ const trafficProgressStyle = computed(() => ({
 <template>
   <div class="instance-detail space-y-4">
     <div v-if="!data" class="p-4">
-      <CardX class="bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md">
+      <CardX
+        class="border-none transition-all rounded-md"
+        :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
+      >
         <Empty description="节点不存在或已被删除">
           <template #extra>
             <Button @click="router.push('/')">
@@ -284,7 +273,7 @@ const trafficProgressStyle = computed(() => ({
         </Button>
         <div class="text-lg font-bold flex gap-2 items-center">
           <img
-            :src="`/images/flags/${getRegionCode(data.region)}.svg`" :alt="getRegionDisplayName(data.region)"
+            :src="getFlagSrc(data.region)" :alt="getRegionDisplayName(data.region)"
             class="size-6"
           >
           <span>{{ data.name }}</span>
@@ -297,7 +286,8 @@ const trafficProgressStyle = computed(() => ({
       <div class="px-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <CardX
           v-for="item in metricCards" :key="item.label" hoverable size="small"
-          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+          class="group h-full border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
           content-class="h-full !p-3"
         >
           <div class="flex h-full min-h-10 md:min-h-18 flex-col justify-between gap-3">
@@ -326,7 +316,8 @@ const trafficProgressStyle = computed(() => ({
       <div class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2">
         <CardX
           title="硬件信息" size="small"
-          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+          class="group h-full border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
         >
           <div class="gap-3 grid grid-cols-3">
             <div
@@ -344,7 +335,8 @@ const trafficProgressStyle = computed(() => ({
 
         <CardX
           title="系统信息" size="small"
-          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+          class="group h-full border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
         >
           <div class="gap-3 grid grid-cols-1 sm:grid-cols-2">
             <div
@@ -370,7 +362,8 @@ const trafficProgressStyle = computed(() => ({
 
         <CardX
           title="存储信息" size="small"
-          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+          class="group h-full border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
         >
           <div class="gap-3 grid grid-cols-3">
             <div
@@ -388,7 +381,8 @@ const trafficProgressStyle = computed(() => ({
 
         <CardX
           title="网络信息" size="small"
-          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+          class="group h-full border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
           content-class="pt-0"
         >
           <div class="gap-3 grid grid-cols-2">

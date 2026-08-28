@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useAppStore } from '@/stores/app'
+
+const appStore = useAppStore()
 
 interface VisitorGeoData {
   ip: string
@@ -47,7 +50,8 @@ const expand = ref(false)
 let clockTimer: number | undefined
 
 const subtitle = computed(() => loading.value ? '检测中' : location.value || '网络访客')
-const flagSrc = computed(() => countryCode.value ? `/images/flags/${countryCode.value}.svg` : '')
+const flagSrc = computed(() => countryCode.value ? `/assets/flags/${countryCode.value}.svg` : '')
+/** 访客 IP 完整显示（不做掩码） */
 const displayIp = computed(() => ip.value)
 
 const visitorRows = computed<VisitorInfoRow[]>(() => [
@@ -325,6 +329,7 @@ onMounted(async () => {
     isp.value = geo.isp
     location.value = geo.location
     countryCode.value = geo.countryCode.toUpperCase()
+    appStore.visitorCountryCode = geo.countryCode.toUpperCase()
   }
   else {
     ip.value = '暂无法获取'
@@ -344,8 +349,12 @@ onUnmounted(() => {
 <template>
   <div class="pointer-events-none fixed inset-x-0 bottom-2.5 z-30 flex justify-center">
     <div
-      class="pointer-events-auto cursor-default bg-background/30 p-1.5 px-3 shadow-[-1px_-1px_0_background,0_0_16px_rgba(0,0,0,0.05)] backdrop-blur-sm transition-[border-radius,transform,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-      :class="[expand ? 'rounded-lg -translate-y-1 bg-background/38 shadow-[-1px_-1px_0_background,0_10px_28px_rgba(0,0,0,0.08)]' : 'rounded-xl']"
+      class="pointer-events-auto cursor-default p-1.5 px-3 shadow-[-1px_-1px_0_background,0_0_16px_rgba(0,0,0,0.05)] transition-[border-radius,transform,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] bg-background/30 backdrop-blur-sm"
+      :class="[
+        expand
+          ? 'rounded-lg -translate-y-1 bg-background/38 shadow-[-1px_-1px_0_background,0_10px_28px_rgba(0,0,0,0.08)]'
+          : 'rounded-xl',
+      ]"
       @click="expand = !expand"
     >
       <TransitionGroup

@@ -1,7 +1,7 @@
 {
   "name": "komari-theme-emerald",
   "type": "module",
-  "version": "1.0.1",
+  "version": "1.0.10-sansan.1",
   "packageManager": "bun@1.3.14",
   "author": {
     "name": "sundayzsy",
@@ -43,7 +43,7 @@
     "@iconify/json": "^2.2.442",
     "@tailwindcss/vite": "^4.1.16",
     "@tsconfig/node24": "^24.0.4",
-    "@types/node": "^24.10.13",
+    "@types/node": "^26.1.1",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vue/eslint-config-typescript": "^14.6.0",
     "@vue/tsconfig": "^0.8.1",

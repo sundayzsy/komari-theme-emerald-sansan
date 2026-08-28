@@ -9,7 +9,7 @@ import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
-import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { getFlagSrc, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getExpireText, hasIPv4, hasIPv6, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
@@ -135,7 +135,7 @@ function openPingDialog() {
     <template #header>
       <div class="flex gap-2 min-w-0 items-center">
         <img
-          v-if="hasRegion(props.node.region)" :src="`/images/flags/${getRegionCode(props.node.region)}.svg`"
+          v-if="hasRegion(props.node.region)" :src="getFlagSrc(props.node.region)"
           :alt="getRegionDisplayName(props.node.region)" class="size-5 shrink-0 rounded-[2px]"
         >
         <span class="text-md font-bold flex-1 min-w-0 truncate">{{ props.node.name }}</span>

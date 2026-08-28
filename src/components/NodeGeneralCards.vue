@@ -6,6 +6,7 @@ import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
+import { useBackgroundSurface } from '@/composables/useBackgroundSurface'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
@@ -20,6 +21,7 @@ const props = defineProps<{
 const NodeEarthMaps = defineAsyncComponent(() => import('@/components/NodeEarthMaps.vue'))
 
 const appStore = useAppStore()
+const { pickSurfaceClass } = useBackgroundSurface()
 const nodesStore = useNodesStore()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exchangeRateBaseCurrency = ref<CurrencyCode>('CNY')
@@ -188,8 +190,11 @@ onMounted(async () => {
     <div :class="cardGridClass">
       <CardX
         hoverable
-        class="group h-full bg-background/50 border-none hover:bg-background backdrop-blur-xs transition-all"
-        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-1 row-start-1' : 'col-span-1 row-start-1 col-start-1 min-h-18 md:min-h-28 md:row-start-1 md:col-start-1'"
+        class="group h-full border-none rounded-md transition-all"
+        :class="[
+          pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs'),
+          showVisualPanel ? 'col-span-4 row-span-1 col-start-1 row-start-1' : 'col-span-1 row-start-1 col-start-1 min-h-18 md:min-h-24 md:row-start-1 md:col-start-1',
+        ]"
         content-class="h-full !p-3"
       >
         <div class="flex h-full flex-col justify-between gap-1">
@@ -217,8 +222,11 @@ onMounted(async () => {
       </CardX>
       <CardX
         hoverable
-        class="group h-full bg-background/50 border-none hover:bg-background backdrop-blur-xs transition-all"
-        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-1 row-start-2' : 'col-span-1 row-start-2 col-start-1 min-h-18 md:min-h-28 md:row-start-1 md:col-start-2'"
+        class="group h-full border-none rounded-md transition-all"
+        :class="[
+          pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs'),
+          showVisualPanel ? 'col-span-4 row-span-1 col-start-1 row-start-2' : 'col-span-1 row-start-2 col-start-1 min-h-18 md:min-h-24 md:row-start-1 md:col-start-2',
+        ]"
         content-class="h-full !p-3"
       >
         <div class="flex h-full flex-col justify-between gap-1">
@@ -245,11 +253,12 @@ onMounted(async () => {
       </CardX>
       <div
         class="relative w-full h-full"
-        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-5 row-start-1' : 'col-span-1 row-start-1 col-start-2 min-h-18 md:min-h-28 md:row-start-1 md:col-start-3'"
+        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-5 row-start-1' : 'col-span-1 row-start-1 col-start-2 min-h-18 md:min-h-24 md:row-start-1 md:col-start-3'"
       >
         <CardX
           hoverable
-          class="group h-full bg-background/50 border-none hover:bg-background backdrop-blur-xs transition-all"
+          class="group h-full border-none rounded-md transition-all"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
           content-class="h-full !p-3" @click="openFinanceCard = !openFinanceCard"
         >
           <div class="flex h-full flex-col justify-between gap-1">
@@ -277,8 +286,11 @@ onMounted(async () => {
         </CardX>
         <CardX
           hoverable
-          class="absolute top-0 left-1/2 -translate-x-[50%] -translate-y-[25%] z-20 w-[260%] max-w-88 h-42 group bg-background/50 rounded-lg shadow-xl border-none backdrop-blur-lg transition-all"
-          :class="openFinanceCard ? 'opacity-100 scale-100  -translate-y-[5%]' : 'opacity-0 pointer-events-none scale-50'"
+          class="absolute top-0 left-1/2 z-20 h-42 w-[260%] max-w-88 -translate-x-[50%] -translate-y-[25%] rounded-md border-none shadow-[0_0_20px,0_0_0_1px] shadow-emerald-600/10 transition-all"
+          :class="[
+            pickSurfaceClass('bg-background', 'bg-background/50 backdrop-blur-lg'),
+            openFinanceCard ? 'opacity-100 scale-100  -translate-y-[5%]' : 'opacity-0 pointer-events-none scale-50',
+          ]"
           content-class="h-full !p-4" @click="openFinanceCard = false"
         >
           <div class="flex h-full min-w-0 flex-col overflow-hidden">
@@ -289,7 +301,7 @@ onMounted(async () => {
                 </div>
                 <Transition v-bind="metricSwitchTransitionProps">
                   <div
-                    :key="`remaining-value-${summaryTransitionKey}-${exchangeRateBaseCurrency}-${openFinanceCard}`" class="flex min-w-0 items-baseline truncate"
+                    :key="`remaining-value-${summaryTransitionKey}-${exchangeRateBaseCurrency}`" class="flex min-w-0 items-baseline truncate"
                     :style="getMetricSwitchStyle(index)"
                   >
                     <span class="shrink-0 text-xs mr-0.5 font-semibold leading-none text-muted-foreground">
@@ -302,7 +314,7 @@ onMounted(async () => {
                 </Transition>
               </div>
             </div>
-            <div class="flex-1" />
+            <div class="flex-1 my-1.5" />
             <div class="shrink-0 flex flex-col flex-1">
               <div class="flex mb-1 items-center justify-between gap-2">
                 <div class="flex items-center gap-1 text-xs font-medium tracking-wider text-muted-foreground">
@@ -318,14 +330,13 @@ onMounted(async () => {
                   </option>
                 </select>
               </div>
-              <div class="flex-1" />
-              <div class="grid grid-cols-2 gap-y-1 gap-x-4">
+              <div class="h-15 grid grid-cols-2 gap-y-1 gap-x-4 overflow-auto">
                 <div
                   v-for="(row, index) in exchangeRateRows" :key="row.currency"
                   class="text-[11px] flex items-center "
                 >
                   <Transition v-bind="metricSwitchTransitionProps">
-                    <div :key="`remaining-value-${exchangeRateBaseCurrency}-${openFinanceCard}`" class="flex-1 flex justify-between" :style="getMetricSwitchStyle(index)">
+                    <div :key="`remaining-value-${exchangeRateBaseCurrency}`" class="flex-1 flex justify-between" :style="getMetricSwitchStyle(index)">
                       <span class="text-muted-foreground">
                         {{ row.currency }}
                       </span>
@@ -342,8 +353,11 @@ onMounted(async () => {
       </div>
       <CardX
         hoverable
-        class="group bg-background/50 border-none hover:bg-background backdrop-blur-xs transition-all"
-        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-5 row-start-2' : 'col-span-1 row-start-2 col-start-2 min-h-18 md:min-h-28 md:row-start-1 md:col-start-4'"
+        class="group h-full border-none rounded-md transition-all"
+        :class="[
+          pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs'),
+          showVisualPanel ? 'col-span-4 row-span-1 col-start-5 row-start-2' : 'col-span-1 row-start-2 col-start-2 min-h-18 md:min-h-24 md:row-start-1 md:col-start-4',
+        ]"
         content-class="h-full !p-3"
       >
         <div class="flex h-full flex-col justify-between gap-1">
@@ -378,8 +392,11 @@ onMounted(async () => {
 
       <CardX
         hoverable
-        class="group bg-background/50 border-none hover:bg-background backdrop-blur-xs transition-all"
-        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-9 row-start-1' : 'col-span-1 row-start-1 col-start-3 min-h-18 md:min-h-28 md:row-start-1 md:col-start-5'"
+        class="group h-full border-none rounded-md transition-all"
+        :class="[
+          pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs'),
+          showVisualPanel ? 'col-span-4 row-span-1 col-start-9 row-start-1' : 'col-span-1 row-start-1 col-start-3 min-h-18 md:min-h-24 md:row-start-1 md:col-start-5',
+        ]"
         content-class="h-full !p-3"
       >
         <div class="flex h-full flex-col justify-between gap-1">
@@ -404,8 +421,11 @@ onMounted(async () => {
       </CardX>
       <CardX
         hoverable
-        class="group bg-background/50 border-none hover:bg-background backdrop-blur-xs transition-all"
-        :class="showVisualPanel ? 'col-span-4 row-span-1 col-start-9 row-start-2' : 'col-span-1 row-start-2 col-start-3 min-h-18 md:min-h-28 md:row-start-1 md:col-start-6'"
+        class="group h-full border-none rounded-md transition-all"
+        :class="[
+          pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs'),
+          showVisualPanel ? 'col-span-4 row-span-1 col-start-9 row-start-2' : 'col-span-1 row-start-2 col-start-3 min-h-18 md:min-h-24 md:row-start-1 md:col-start-6',
+        ]"
         content-class="h-full !p-3"
       >
         <div class="flex h-full flex-col justify-between gap-1">
