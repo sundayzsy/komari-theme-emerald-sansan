@@ -426,7 +426,8 @@ const trafficProgressStyle = computed(() => ({
       <div v-if="showIpCard" class="px-4">
         <CardX
           title="IP 信息" size="small"
-          class="group h-full bg-background/50 backdrop-blur-xs border-none hover:bg-background transition-all rounded-md"
+          class="group h-full border-none transition-all rounded-md"
+          :class="pickSurfaceClass('bg-background/60 hover:bg-background', 'bg-background/50 hover:bg-background backdrop-blur-xs')"
         >
           <div class="gap-3 grid grid-cols-1 sm:grid-cols-2">
             <!-- IPv4 -->
