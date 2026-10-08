@@ -7,7 +7,7 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
-import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
+import { formatBytesPerSecondWithConfig, formatBytesSplit, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getFlagSrc, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getExpireText, hasIPv4, hasIPv6, parseTags } from '@/utils/tagHelper'
@@ -24,6 +24,11 @@ const appStore = useAppStore()
 /** 价格斜杠两侧空格匹配（提到模块作用域避免重复编译） */
 const PRICE_SLASH_SPACE_REGEX = /\s*\/\s*/g
 
+/** 字节单位顺序，与 helper 的 1024 进制保持一致，用于把已用量换算到总量的单位 */
+const USAGE_BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+/** 数值达到该阈值时不保留小数，压缩卡片上的显示宽度 */
+const USAGE_INTEGER_THRESHOLD = 100
+
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'hour')
@@ -34,6 +39,31 @@ const memPercentage = computed(() => (props.node.ram ?? 0) / (props.node.mem_tot
 const memStatus = computed(() => getStatus(memPercentage.value))
 const diskPercentage = computed(() => (props.node.disk ?? 0) / (props.node.disk_total || 1) * 100)
 const diskStatus = computed(() => getStatus(diskPercentage.value))
+
+/** 按小数位格式化数值；四舍五入后 ≥ 阈值时不保留小数 */
+function formatUsageNumber(value: number, decimals: number): string {
+  const fixed = value.toFixed(decimals)
+  return Number(fixed) >= USAGE_INTEGER_THRESHOLD ? value.toFixed(0) : fixed
+}
+
+/**
+ * 已用/总量的紧凑文本，如 0.5/1.9 GB
+ * 已用量换算到总量的单位，单位只写一次；小数位沿用字节精度配置
+ */
+function formatUsage(used: number, total: number): string {
+  if (!total || total <= 0)
+    return ''
+  const { value, unit } = formatBytesSplit(total, appStore.byteDecimals)
+  const unitIndex = USAGE_BYTE_UNITS.indexOf(unit)
+  if (unitIndex < 0)
+    return formatBytes(total)
+  const decimals = value.split('.')[1]?.length ?? 0
+  const divisor = 1024 ** unitIndex
+  return `${formatUsageNumber(Math.max(used, 0) / divisor, decimals)}/${formatUsageNumber(total / divisor, decimals)} ${unit}`
+}
+
+const memUsageText = computed(() => formatUsage(props.node.ram ?? 0, props.node.mem_total ?? 0))
+const diskUsageText = computed(() => formatUsage(props.node.disk ?? 0, props.node.disk_total ?? 0))
 
 const {
   latencyRenderBars,
@@ -210,7 +240,7 @@ function openPingDialog() {
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:database" width="14" height="14" class="text-muted-foreground shrink-0" />
                   <span class="font-semibold text-muted-foreground">磁盘</span>
-                  <span class="text-[10px] font-semibold text-muted-foreground truncate min-w-0 flex-1">{{ formatBytes(props.node.disk_total ?? 0) }}</span>
+                  <span class="text-[10px] font-semibold text-muted-foreground truncate min-w-0 flex-1">{{ diskUsageText }}</span>
                   <span class="ml-auto font-bold text-xs tabular-nums text-foreground/85 shrink-0">{{ diskPercentage.toFixed(1) }}%</span>
                 </div>
                 <ProgressThin :percentage="diskPercentage" :status="diskStatus" bar-class="bg-gradient-to-r from-amber-500 to-amber-400" :height="5" />
@@ -274,7 +304,7 @@ function openPingDialog() {
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:device-sd-card" width="14" height="14" class="text-muted-foreground shrink-0" />
                   <span class="font-semibold text-muted-foreground">内存</span>
-                  <span class="text-[10px] font-semibold text-muted-foreground truncate min-w-0 flex-1">{{ formatBytes(props.node.mem_total ?? 0) }}</span>
+                  <span class="text-[10px] font-semibold text-muted-foreground truncate min-w-0 flex-1">{{ memUsageText }}</span>
                   <span class="ml-auto font-bold text-xs tabular-nums text-foreground/85 shrink-0">{{ memPercentage.toFixed(1) }}%</span>
                 </div>
                 <ProgressThin :percentage="memPercentage" :status="memStatus" bar-class="bg-gradient-to-r from-purple-500 to-purple-400" :height="5" />
