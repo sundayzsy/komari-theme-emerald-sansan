@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import type { NodePingFocus, NodePingLine } from '@/composables/useNodePingLines'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
-import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
+import { useNodePingLines } from '@/composables/useNodePingLines'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesSplit, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
@@ -16,7 +17,8 @@ const props = defineProps<{ node: NodeData }>()
 
 const emit = defineEmits<{
   click: []
-  pingClick: [node: NodeData]
+  /** focus 为点击的线路；弹窗默认只显示这条线路 */
+  pingClick: [node: NodeData, focus?: NodePingFocus]
 }>()
 
 const appStore = useAppStore()
@@ -65,12 +67,21 @@ function formatUsage(used: number, total: number): string {
 const memUsageText = computed(() => formatUsage(props.node.ram ?? 0, props.node.mem_total ?? 0))
 const diskUsageText = computed(() => formatUsage(props.node.disk ?? 0, props.node.disk_total ?? 0))
 
-const {
-  latencyRenderBars,
-  lossRenderBars,
-  latencyDisplay,
-  lossDisplay,
-} = useNodePingDisplay(() => props.node.uuid)
+// [legacy-ping-bars] 旧版「所有线路混合」的延迟 / 丢包条已停用。
+// 恢复方法：取消下面这段注释（含 import 和 openPingDialog），并恢复模板中同样标记的两个注释块。
+// import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
+// const {
+//   latencyRenderBars,
+//   lossRenderBars,
+//   latencyDisplay,
+//   lossDisplay,
+// } = useNodePingDisplay(() => props.node.uuid)
+// function openPingDialog() {
+//   emit('pingClick', props.node)
+// }
+
+/** 分线路延迟 / 丢包：后台延迟监测任务列表的前三个 */
+const { lines: pingLines } = useNodePingLines(() => props.node.uuid)
 
 function showTrafficProgress(node: NodeData): boolean {
   return node.traffic_limit > 0
@@ -149,8 +160,12 @@ function hasRegion(region: string | null | undefined): boolean {
   return Boolean(region?.trim())
 }
 
-function openPingDialog() {
-  emit('pingClick', props.node)
+/** 点击某条线路的条形图：弹窗默认只显示这条线路；占位行（未配置等）按全部线路打开 */
+function openPingLineDialog(line: NodePingLine) {
+  if (line.taskId === null)
+    emit('pingClick', props.node)
+  else
+    emit('pingClick', props.node, { taskId: line.taskId, name: line.name })
 }
 </script>
 
@@ -260,7 +275,8 @@ function openPingDialog() {
                 <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
               </div>
 
-              <!-- 延迟：标题行仅展示，点击与悬停交互只在条形图上 -->
+              <!-- [legacy-ping-bars] 开始：旧版延迟（所有线路混合）。恢复时删除本行与「结束」行，并把下一行说明改回注释
+              延迟：标题行仅展示，点击与悬停交互只在条形图上
               <div class="flex flex-col gap-1">
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:activity" width="14" height="14" class="text-blue-500 shrink-0" />
@@ -283,6 +299,43 @@ function openPingDialog() {
                       :class="bar.className"
                     />
                   </DataTooltip>
+                </div>
+              </div>
+              [legacy-ping-bars] 结束 -->
+
+              <!-- 分线路延迟：后台延迟监测的前三个任务，任务名在上、条形图在下；点击与悬停只在条形图上 -->
+              <div class="flex flex-col gap-[5px] rounded-md bg-slate-500/5 p-1.5">
+                <div class="flex items-center gap-1.5 text-[11px] leading-none">
+                  <Icon icon="tabler:activity" width="14" height="14" class="text-blue-500 shrink-0" />
+                  <span class="font-semibold text-muted-foreground">延迟</span>
+                </div>
+                <div v-for="line in pingLines" :key="line.key" class="flex flex-col gap-[3px]">
+                  <div class="flex items-center gap-1.5 text-[11px] leading-3">
+                    <span
+                      class="size-1.5 shrink-0 rounded-full"
+                      :class="[!line.color && 'bg-muted-foreground/30']"
+                      :style="line.color ? { backgroundColor: line.color } : undefined"
+                    />
+                    <span class="min-w-0 flex-1 truncate text-muted-foreground">{{ line.name }}</span>
+                    <span class="shrink-0 font-bold text-xs tabular-nums text-foreground/85">{{ line.latencyText }}</span>
+                  </div>
+                  <div
+                    role="button"
+                    tabindex="0"
+                    class="group/panel grid h-2 cursor-pointer items-end gap-[1px] rounded-[1px] opacity-80 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    :style="{ gridTemplateColumns: `repeat(${line.latencyBars.length}, minmax(0, 1fr))` }"
+                    :aria-label="`${props.node.name} ${line.name} 延迟`"
+                    @click.stop="openPingLineDialog(line)"
+                    @keydown.enter.stop.prevent="openPingLineDialog(line)"
+                    @keydown.space.stop.prevent="openPingLineDialog(line)"
+                  >
+                    <DataTooltip v-for="bar in line.latencyBars" :key="bar.key" placement="top" :content="bar.tooltip" class="h-full w-full">
+                      <span
+                        class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-140 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
+                        :class="bar.className"
+                      />
+                    </DataTooltip>
+                  </div>
                 </div>
               </div>
 
@@ -337,7 +390,8 @@ function openPingDialog() {
                 <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
               </div>
 
-              <!-- 丢包：标题行仅展示，点击与悬停交互只在条形图上 -->
+              <!-- [legacy-ping-bars] 开始：旧版丢包（所有线路混合）。恢复时删除本行与「结束」行，并把下一行说明改回注释
+              丢包：标题行仅展示，点击与悬停交互只在条形图上
               <div class="flex flex-col gap-1">
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:wifi" width="14" height="14" class="text-muted-foreground/70 shrink-0" />
@@ -360,6 +414,43 @@ function openPingDialog() {
                       :class="bar.className"
                     />
                   </DataTooltip>
+                </div>
+              </div>
+              [legacy-ping-bars] 结束 -->
+
+              <!-- 分线路丢包：与左侧延迟面板使用同一组线路，行数一致，两列等高 -->
+              <div class="flex flex-col gap-[5px] rounded-md bg-slate-500/5 p-1.5">
+                <div class="flex items-center gap-1.5 text-[11px] leading-none">
+                  <Icon icon="tabler:wifi" width="14" height="14" class="text-muted-foreground/70 shrink-0" />
+                  <span class="font-semibold text-muted-foreground">丢包</span>
+                </div>
+                <div v-for="line in pingLines" :key="line.key" class="flex flex-col gap-[3px]">
+                  <div class="flex items-center gap-1.5 text-[11px] leading-3">
+                    <span
+                      class="size-1.5 shrink-0 rounded-full"
+                      :class="[!line.color && 'bg-muted-foreground/30']"
+                      :style="line.color ? { backgroundColor: line.color } : undefined"
+                    />
+                    <span class="min-w-0 flex-1 truncate text-muted-foreground">{{ line.name }}</span>
+                    <span class="shrink-0 font-bold text-xs tabular-nums text-foreground/85">{{ line.lossText }}</span>
+                  </div>
+                  <div
+                    role="button"
+                    tabindex="0"
+                    class="group/panel grid h-2 cursor-pointer items-end gap-[1px] rounded-[1px] opacity-80 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    :style="{ gridTemplateColumns: `repeat(${line.lossBars.length}, minmax(0, 1fr))` }"
+                    :aria-label="`${props.node.name} ${line.name} 丢包`"
+                    @click.stop="openPingLineDialog(line)"
+                    @keydown.enter.stop.prevent="openPingLineDialog(line)"
+                    @keydown.space.stop.prevent="openPingLineDialog(line)"
+                  >
+                    <DataTooltip v-for="bar in line.lossBars" :key="bar.key" placement="top" :content="bar.tooltip" class="h-full w-full">
+                      <span
+                        class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-140 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
+                        :class="bar.className"
+                      />
+                    </DataTooltip>
+                  </div>
                 </div>
               </div>
 

@@ -16,6 +16,8 @@ import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
   uuid: string
+  /** 从卡片某条线路打开时传入：默认只选中这条线路，其余线路可在下方任务卡片中手动开启 */
+  focusTaskId?: number | null
 }>()
 
 const appStore = useAppStore()
@@ -330,7 +332,7 @@ async function fetchRecords() {
     tasks.value = result.tasks
 
     if (tasks.value.length > 0 && selectedTaskIds.value.length === 0) {
-      selectedTaskIds.value = tasks.value.map(t => t.id)
+      selectedTaskIds.value = getDefaultSelectedTaskIds()
     }
   }
   catch (err) {
@@ -527,6 +529,14 @@ const packetLossMarkers = computed(() => {
 
   return markers
 })
+
+// 默认选中：指定了 focusTaskId 且该节点有这条线路时只选它，否则选中全部
+function getDefaultSelectedTaskIds(): number[] {
+  const focusTaskId = props.focusTaskId
+  if (focusTaskId != null && tasks.value.some(t => t.id === focusTaskId))
+    return [focusTaskId]
+  return tasks.value.map(t => t.id)
+}
 
 // 切换任务选中状态
 function toggleTask(taskId: number) {
@@ -725,6 +735,11 @@ watch(() => props.uuid, () => {
   tasks.value = []
   selectedTaskIds.value = []
   fetchRecords()
+})
+
+watch(() => props.focusTaskId, () => {
+  if (tasks.value.length > 0)
+    selectedTaskIds.value = getDefaultSelectedTaskIds()
 })
 
 onMounted(() => {

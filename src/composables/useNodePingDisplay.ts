@@ -47,7 +47,7 @@ export function getPingToneClass(value: number): string {
   return 'text-rose-600 dark:text-rose-400'
 }
 
-function getLatencyToneClass(latency: number): string {
+export function getLatencyToneClass(latency: number): string {
   if (latency <= 60)
     return 'bg-emerald-600/90'
   if (latency <= 120)
@@ -59,7 +59,7 @@ function getLatencyToneClass(latency: number): string {
   return 'bg-rose-500/80'
 }
 
-function getLossToneClass(loss: number): string {
+export function getLossToneClass(loss: number): string {
   if (loss <= 1)
     return 'bg-emerald-600/90'
   if (loss <= 3)

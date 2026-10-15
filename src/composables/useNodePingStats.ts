@@ -18,7 +18,7 @@ export interface NodePingStatsState {
   perTaskStats: NodePingPerTaskStat[]
 }
 
-interface PingRecord {
+export interface PingRecord {
   client: string
   task_id: number
   time: string
@@ -30,7 +30,7 @@ interface SharedPingRecordsResponse {
   tasks?: PingTaskInfo[]
 }
 
-interface PingTaskInfo {
+export interface PingTaskInfo {
   id: number
   name: string
 }
@@ -55,11 +55,14 @@ export interface NodePingPerTaskStat {
   name: string
   avgLatency: number
   loss: number
+  /** 该线路按时间分段的延迟/丢包，固定 NODE_PING_BAR_COUNT 段；同一节点各线路的时间边界一致 */
+  history: NodePingHistoryPoint[]
 }
 
 // 保持 Sansan 卡片的延迟条密度（上游为 10）
 export const NODE_PING_BAR_COUNT = 20
-const CACHE_VERSION = 6
+// 7：perTaskStats 增加分线路 history，且保留整段时间都不通的线路
+const CACHE_VERSION = 7
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
@@ -337,6 +340,88 @@ function buildPingHistory(records: PingRecord[]): NodePingHistoryPoint[] {
   })
 }
 
+/**
+ * 把单条线路的记录分到固定的 NODE_PING_BAR_COUNT 个时间段里。
+ * 时间边界由调用方传入（同一节点所有线路共用），保证各线路的条形图上下对齐；
+ * 没有记录的时间段 latency/loss 为 null。
+ */
+function buildTaskPingHistory(records: PingRecord[], firstTime: number, lastTime: number): NodePingHistoryPoint[] {
+  const bucketCount = NODE_PING_BAR_COUNT
+  const bucketSize = Math.max(1, (lastTime - firstTime) / bucketCount)
+  // 每段必须是独立对象：不要改成 Array.from({ length }).fill({...})，fill 会让所有段共用同一个对象
+  const buckets: Array<{ total: number, lost: number, latencySum: number }> = []
+  for (let i = 0; i < bucketCount; i++)
+    buckets.push({ total: 0, lost: 0, latencySum: 0 })
+
+  for (const record of records) {
+    const timestamp = new Date(record.time).getTime()
+    if (!Number.isFinite(timestamp))
+      continue
+
+    // 与 buildPingHistory 一致：区间左闭右开，最后一段包含结束时刻
+    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((timestamp - firstTime) / bucketSize)))
+    const bucket = buckets[index]!
+    bucket.total += 1
+    if (record.value >= 0)
+      bucket.latencySum += record.value
+    else
+      bucket.lost += 1
+  }
+
+  return buckets.map((bucket, index) => {
+    const success = bucket.total - bucket.lost
+    return {
+      time: new Date(firstTime + bucketSize * index).toISOString(),
+      latency: success > 0 ? bucket.latencySum / success : null,
+      loss: bucket.total > 0 ? bucket.lost / bucket.total * 100 : null,
+    }
+  })
+}
+
+/**
+ * 分线路统计：每条有记录的线路都保留（整段时间都不通时 avgLatency 为 -1、loss 为 100），
+ * 并生成时间边界对齐的分段 history。排序跟随后端 tasks 数组顺序。
+ */
+export function buildPerTaskStats(records: PingRecord[], tasks: PingTaskInfo[]): NodePingPerTaskStat[] {
+  let firstTime = Number.POSITIVE_INFINITY
+  let lastTime = Number.NEGATIVE_INFINITY
+  const taskRecords = new Map<number, PingRecord[]>()
+
+  for (const record of records) {
+    const timestamp = new Date(record.time).getTime()
+    if (!Number.isFinite(timestamp))
+      continue
+
+    firstTime = Math.min(firstTime, timestamp)
+    lastTime = Math.max(lastTime, timestamp)
+
+    const currentRecords = taskRecords.get(record.task_id) ?? []
+    currentRecords.push(record)
+    taskRecords.set(record.task_id, currentRecords)
+  }
+
+  if (!taskRecords.size)
+    return []
+
+  const taskOrderMap = new Map(tasks.map((t, index) => [t.id, index]))
+  const taskNameMap = new Map(tasks.map(t => [t.id, t.name]))
+
+  return Array.from(taskRecords.entries(), ([taskId, taskRecs]) => {
+    const validValues = taskRecs.map(r => r.value).filter(v => v >= 0)
+    const avgLatency = validValues.length ? average(validValues) : -1
+    const loss = (taskRecs.length - validValues.length) / taskRecs.length * 100
+    const name = taskNameMap.get(taskId) ?? `Ping ${taskId}`
+    return {
+      taskId,
+      name,
+      avgLatency,
+      loss,
+      history: buildTaskPingHistory(taskRecs, firstTime, lastTime),
+    }
+  })
+    .sort((a, b) => (taskOrderMap.get(a.taskId) ?? 0) - (taskOrderMap.get(b.taskId) ?? 0))
+}
+
 function getPercentile(values: number[], percentile: number): number | null {
   if (!values.length)
     return null
@@ -358,9 +443,11 @@ function getPercentile(values: number[], percentile: number): number | null {
 
 function buildStats(records: PingRecord[], tasks: PingTaskInfo[]): NodePingStatsState {
   const includedTaskIds = getIncludedTaskIds(records)
+  // 分线路统计单独计算，不受下面的「至少成功过一次」过滤影响，整段时间都不通的线路也要显示 100% 丢包
+  const perTaskStats = buildPerTaskStats(records, tasks)
 
   if (!includedTaskIds.size)
-    return createEmptyStats()
+    return { ...createEmptyStats(), perTaskStats }
 
   const filteredRecords = records.filter(record => includedTaskIds.has(record.task_id))
   const history = buildPingHistory(filteredRecords)
@@ -407,19 +494,6 @@ function buildStats(records: PingRecord[], tasks: PingTaskInfo[]): NodePingStats
   const avgLoss = taskLossValues.length ? average(taskLossValues) : average(historyLossValues)
   const avgVolatility = average(volatilityValues)
   const hasData = history.length > 0 || latencyValues.length > 0 || taskLossValues.length > 0
-
-  const taskOrderMap = new Map(tasks.map((t, index) => [t.id, index]))
-  const taskNameMap = new Map(tasks.map(t => [t.id, t.name]))
-  const perTaskStats: NodePingPerTaskStat[] = Array.from(taskRecords.entries(), ([taskId, taskRecs]) => {
-    const validValues = taskRecs.map(r => r.value).filter(v => v >= 0)
-    const avgLatency = validValues.length ? average(validValues) : -1
-    const loss = taskRecs.length
-      ? (taskRecs.length - validValues.length) / taskRecs.length * 100
-      : 100
-    const name = taskNameMap.get(taskId) ?? `Ping ${taskId}`
-    return { taskId, name, avgLatency, loss }
-  })
-    .sort((a, b) => (taskOrderMap.get(a.taskId) ?? 0) - (taskOrderMap.get(b.taskId) ?? 0))
 
   return {
     avgLatency,
@@ -535,6 +609,17 @@ export function useNodePingStats(
 
   const perTaskStats = computed<NodePingPerTaskStat[]>(() => stats.value.perTaskStats)
 
+  /**
+   * 全站延迟监测任务列表（后端返回顺序）。
+   * 共享请求不带 uuid，后端返回的是全部任务；共享数据尚未加载时为 null。
+   */
+  const tasks = computed<PingTaskInfo[] | null>(() => {
+    const { hours, enabled } = resolved.value
+    if (!enabled)
+      return []
+    return getSharedPingRecordsEntry(hours).data.value?.tasks ?? null
+  })
+
   // 共享记录会定时刷新，节流回写 localStorage，避免多节点同时重算时密集写盘。
   const persistStats = useThrottleFn(
     (nodeUuid: string, hours: number, value: NodePingStatsState) => {
@@ -563,5 +648,6 @@ export function useNodePingStats(
     avgVolatility: computed(() => stats.value.avgVolatility),
     hasData: computed(() => stats.value.hasData),
     perTaskStats,
+    tasks,
   }
 }

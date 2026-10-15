@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { NodePingFocus } from '@/composables/useNodePingLines'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { useDebounceFn } from '@vueuse/core'
@@ -47,6 +48,8 @@ onDeactivated(() => {
 const searchText = ref('')
 const debouncedSearchText = ref('')
 const selectedPingNodeUuid = ref<string | null>(null)
+/** 从卡片某条线路打开弹窗时记录该线路，弹窗默认只显示它；列表视图打开时为 null，显示全部线路 */
+const selectedPingFocus = ref<NodePingFocus | null>(null)
 
 const updateDebouncedSearch = useDebounceFn((value: string) => {
   debouncedSearchText.value = value
@@ -119,8 +122,10 @@ const selectedPingNode = computed(() => {
 const pingDialogOpen = computed({
   get: () => selectedPingNode.value !== null,
   set: (open: boolean) => {
-    if (!open)
+    if (!open) {
       selectedPingNodeUuid.value = null
+      selectedPingFocus.value = null
+    }
   },
 })
 
@@ -128,8 +133,9 @@ function handleNodeClick(node: typeof nodesStore.nodes[number]) {
   router.push({ name: 'instance-detail', params: { id: node.uuid } })
 }
 
-function handlePingClick(node: NodeData) {
+function handlePingClick(node: NodeData, focus?: NodePingFocus) {
   selectedPingNodeUuid.value = node.uuid
+  selectedPingFocus.value = focus ?? null
 }
 
 function getNodeItemTransitionKey(node: typeof nodesStore.nodes[number]): string {
@@ -260,7 +266,7 @@ function getNodeItemTransitionStyle(index: number): Record<string, string> {
       >
         <DialogHeader class="flex h-13 flex-row items-center px-4">
           <DialogTitle class="truncate">
-            {{ selectedPingNode.name }} 延迟 / 丢包
+            {{ selectedPingNode.name }}{{ selectedPingFocus ? ` · ${selectedPingFocus.name}` : '' }} 延迟 / 丢包
           </DialogTitle>
           <div class="absolute inset-0 mx-0 max-w-none overflow-hidden bg-slate-50 dark:bg-slate-900/50 -z-9 zoom-90">
             <div class="absolute top-0 left-1/2 -ml-152 h-100 w-325 dark:mask-[linear-gradient(white,transparent)]">
@@ -291,7 +297,7 @@ function getNodeItemTransitionStyle(index: number): Record<string, string> {
           </div>
         </DialogHeader>
         <div class="max-h-[calc(90vh-4rem)] overflow-y-auto p-4 pt-0">
-          <PingChart :uuid="selectedPingNode.uuid" />
+          <PingChart :uuid="selectedPingNode.uuid" :focus-task-id="selectedPingFocus?.taskId" />
         </div>
       </DialogContent>
     </Dialog>
