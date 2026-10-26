@@ -261,17 +261,17 @@ function openPingLineDialog(line: NodePingLine) {
                 <ProgressThin :percentage="diskPercentage" :status="diskStatus" bar-class="bg-gradient-to-r from-amber-500 to-amber-400" :height="5" />
               </div>
 
-              <!-- 下载速率 -->
+              <!-- 入站速率 -->
               <div class="flex items-center gap-1.5 text-[11px] leading-none">
                 <Icon icon="tabler:arrow-down" width="14" height="14" class="text-blue-500 shrink-0" />
-                <span class="font-semibold text-muted-foreground">下载</span>
+                <span class="font-semibold text-muted-foreground">入站</span>
                 <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ formatBytesPerSecond(props.node.net_in ?? 0) }}</span>
               </div>
 
-              <!-- 下载流量 -->
+              <!-- 入站流量 -->
               <div class="flex items-center gap-1.5 text-[11px] leading-none">
                 <Icon icon="tabler:cloud" width="14" height="14" class="text-muted-foreground/70 shrink-0" />
-                <span class="font-semibold text-muted-foreground whitespace-nowrap shrink-0">下载流量</span>
+                <span class="font-semibold text-muted-foreground whitespace-nowrap shrink-0">入站流量</span>
                 <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
               </div>
 
@@ -363,11 +363,11 @@ function openPingLineDialog(line: NodePingLine) {
                 <ProgressThin :percentage="memPercentage" :status="memStatus" bar-class="bg-gradient-to-r from-purple-500 to-purple-400" :height="5" />
               </div>
 
-              <!-- 月度流量 -->
+              <!-- 月流量 -->
               <div class="flex flex-col gap-[3px]">
                 <div class="flex items-center gap-1.5 text-[11px] leading-none">
                   <Icon icon="tabler:chart-pie" width="14" height="14" class="text-muted-foreground shrink-0" />
-                  <span class="font-semibold text-muted-foreground whitespace-nowrap shrink-0">月度</span>
+                  <span class="font-semibold text-muted-foreground whitespace-nowrap shrink-0">月流量</span>
                   <span class="ml-auto font-bold text-xs tabular-nums text-foreground/85 shrink-0 whitespace-nowrap">
                     <template v-if="showTrafficProgress(node)">{{ formatBytes(trafficUsed) }}/{{ formatBytes(props.node.traffic_limit) }}</template>
                     <template v-else>{{ formatBytes(trafficUsed) }}/∞</template>
@@ -376,17 +376,17 @@ function openPingLineDialog(line: NodePingLine) {
                 <ProgressThin :percentage="trafficUsedPercentage" bar-class="bg-gradient-to-r from-emerald-500 to-emerald-400" :height="5" />
               </div>
 
-              <!-- 上传速率 -->
+              <!-- 出站速率 -->
               <div class="flex items-center gap-1.5 text-[11px] leading-none">
                 <Icon icon="tabler:arrow-up" width="14" height="14" class="text-green-500 shrink-0" />
-                <span class="font-semibold text-muted-foreground">上传</span>
+                <span class="font-semibold text-muted-foreground">出站</span>
                 <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
               </div>
 
-              <!-- 上传流量 -->
+              <!-- 出站流量 -->
               <div class="flex items-center gap-1.5 text-[11px] leading-none">
                 <Icon icon="tabler:cloud" width="14" height="14" class="text-muted-foreground/70 shrink-0" />
-                <span class="font-semibold text-muted-foreground whitespace-nowrap shrink-0">上传流量</span>
+                <span class="font-semibold text-muted-foreground whitespace-nowrap shrink-0">出站流量</span>
                 <span class="ml-auto font-semibold text-xs tabular-nums text-foreground/85">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
               </div>
 
