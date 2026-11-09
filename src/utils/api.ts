@@ -174,6 +174,13 @@ export interface PingTask {
   loss: number
 }
 
+/** 后台延迟监测任务与服务器绑定关系（公开接口 /api/task/ping） */
+export interface PingTaskAssignment {
+  id: number
+  name: string
+  clients: string[]
+}
+
 /** Ping 历史记录响应 */
 export interface PingRecordsResponse {
   count: number
@@ -370,6 +377,11 @@ export class KomariApi {
    */
   async getNodes(): Promise<NodeInfo[]> {
     return this.get<NodeInfo[]>('/nodes')
+  }
+
+  /** 后台的 Ping 任务列表（含每个任务实际分配的服务器 UUID） */
+  async getPingTaskAssignments(): Promise<PingTaskAssignment[]> {
+    return this.get<PingTaskAssignment[]>('/task/ping')
   }
 
   /**

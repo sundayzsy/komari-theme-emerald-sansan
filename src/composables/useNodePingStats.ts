@@ -1,6 +1,8 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { PingTaskAssignment } from '@/utils/api'
 import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
+import { getSharedApi } from '@/utils/api'
 import { getSharedRpc } from '@/utils/rpc'
 
 export interface NodePingHistoryPoint {
@@ -38,6 +40,7 @@ export interface PingTaskInfo {
 interface SharedPingRecordsState {
   recordsByClient: Map<string, PingRecord[]>
   tasks: PingTaskInfo[]
+  assignments: PingTaskAssignment[] | null
 }
 
 interface SharedPingRecordsEntry {
@@ -241,15 +244,20 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
 
   entry.promise = (async () => {
     try {
-      const result = await rpc.getClient().call<SharedPingRecordsResponse>('common:getRecords', {
-        type: 'ping',
-        // 新版 getRecords 可能只返回近期可用样本，hours 仅作为服务端查询窗口。
-        hours,
-      })
+      const [result, assignments] = await Promise.all([
+        rpc.getClient().call<SharedPingRecordsResponse>('common:getRecords', {
+          type: 'ping',
+          // 新版 getRecords 可能只返回近期可用样本，hours 仅作为服务端查询窗口。
+          hours,
+        }),
+        // 任务配置接口失败时保留正常的 Ping 历史数据，但不显示无依据的线路绑定。
+        getSharedApi().getPingTaskAssignments().catch(() => null),
+      ])
 
       entry.data.value = {
         recordsByClient: buildRecordsByClient(result?.records ?? []),
         tasks: result?.tasks ?? [],
+        assignments,
       }
       entry.lastFetchedAt = Date.now()
     }
@@ -609,6 +617,14 @@ export function useNodePingStats(
 
   const perTaskStats = computed<NodePingPerTaskStat[]>(() => stats.value.perTaskStats)
 
+  /** 与历史数据同时刷新，直接反映后台配置的任务-节点关联。 */
+  const assignments = computed<PingTaskAssignment[] | null>(() => {
+    const { hours, enabled } = resolved.value
+    if (!enabled)
+      return []
+    return getSharedPingRecordsEntry(hours).data.value?.assignments ?? null
+  })
+
   /**
    * 全站延迟监测任务列表（后端返回顺序）。
    * 共享请求不带 uuid，后端返回的是全部任务；共享数据尚未加载时为 null。
@@ -649,5 +665,6 @@ export function useNodePingStats(
     hasData: computed(() => stats.value.hasData),
     perTaskStats,
     tasks,
+    assignments,
   }
 }

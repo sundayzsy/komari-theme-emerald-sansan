@@ -80,7 +80,7 @@ const diskUsageText = computed(() => formatUsage(props.node.disk ?? 0, props.nod
 //   emit('pingClick', props.node)
 // }
 
-/** 分线路延迟 / 丢包：后台延迟监测任务列表的前三个 */
+/** 分线路延迟 / 丢包：后台分配给当前节点的前三个监测任务 */
 const { lines: pingLines } = useNodePingLines(() => props.node.uuid)
 
 function showTrafficProgress(node: NodeData): boolean {

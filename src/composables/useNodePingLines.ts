@@ -1,7 +1,8 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { NodePingBar, NodePingMetric } from '@/composables/useNodePingDisplay'
-import type { NodePingHistoryPoint, NodePingPerTaskStat, PingTaskInfo } from '@/composables/useNodePingStats'
-import { computed, watch } from 'vue'
+import type { NodePingHistoryPoint, NodePingPerTaskStat } from '@/composables/useNodePingStats'
+import type { PingTaskAssignment } from '@/utils/api'
+import { computed, toValue } from 'vue'
 import { getLatencyToneClass, getLossToneClass } from '@/composables/useNodePingDisplay'
 import { NODE_PING_BAR_COUNT, useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
@@ -14,10 +15,6 @@ const PING_LINES_QUERY_HOURS = 1
 
 /** 圆点颜色：按位置取 PingChart 曲线配色的前三个 */
 const PING_LINE_COLORS = ['#FF6B6B', '#4ECDC4', '#A78BFA'] as const
-
-/** 记住上次的线路列表，首屏在共享数据返回前先按它渲染，避免卡片高度跳动 */
-const LINE_TASKS_CACHE_KEY = 'komari-theme-emerald:ping-line-tasks'
-const LINE_TASKS_CACHE_VERSION = 1
 
 /** 卡片上一条线路对应的延迟监测任务 */
 export interface NodePingLineTask {
@@ -52,64 +49,19 @@ export interface NodePingLinesStatus {
   error: boolean
 }
 
-function isLineTask(value: unknown): value is NodePingLineTask {
-  if (!value || typeof value !== 'object')
-    return false
-  const task = value as Record<string, unknown>
-  return typeof task.id === 'number' && typeof task.name === 'string'
-}
-
-function readLineTasksCache(): NodePingLineTask[] | null {
-  if (typeof window === 'undefined')
-    return null
-
-  try {
-    const raw = window.localStorage.getItem(LINE_TASKS_CACHE_KEY)
-    if (!raw)
-      return null
-
-    const parsed = JSON.parse(raw) as { version?: number, tasks?: unknown }
-    if (parsed.version !== LINE_TASKS_CACHE_VERSION || !Array.isArray(parsed.tasks) || !parsed.tasks.every(isLineTask))
-      return null
-
-    return parsed.tasks.slice(0, NODE_PING_LINE_LIMIT)
-  }
-  catch {
-    return null
-  }
-}
-
-let cachedLineTasks: NodePingLineTask[] | null = readLineTasksCache()
-let cachedLineTasksJson = cachedLineTasks ? JSON.stringify(cachedLineTasks) : ''
-
-function persistLineTasks(tasks: NodePingLineTask[]): void {
-  const json = JSON.stringify(tasks)
-  // 每张卡片都会触发，内容没变就不重复写入
-  if (json === cachedLineTasksJson)
-    return
-
-  cachedLineTasks = tasks
-  cachedLineTasksJson = json
-
-  if (typeof window === 'undefined')
-    return
-
-  try {
-    window.localStorage.setItem(
-      LINE_TASKS_CACHE_KEY,
-      JSON.stringify({ version: LINE_TASKS_CACHE_VERSION, tasks }),
-    )
-  }
-  catch {
-  }
-}
-
-/** 取后台任务列表的前 NODE_PING_LINE_LIMIT 个，只保留 id 与名称 */
-export function pickLineTasks(tasks: PingTaskInfo[]): NodePingLineTask[] {
-  return tasks.slice(0, NODE_PING_LINE_LIMIT).map(task => ({
-    id: task.id,
-    name: task.name || `Ping ${task.id}`,
-  }))
+/**
+ * 任务列表以 Komari 后台的 clients 分配关系为准。
+ * 每个节点仅展示分配给自身的前三条监测任务（包括 HTTP、TCP 等），
+ * 延迟和丢包均以相同 taskId 查找记录，不会误读其他节点的任务。
+ */
+export function pickNodeLineTasks(uuid: string, assignments: PingTaskAssignment[]): NodePingLineTask[] {
+  return assignments
+    .filter(task => Array.isArray(task.clients) && task.clients.includes(uuid))
+    .slice(0, NODE_PING_LINE_LIMIT)
+    .map(task => ({
+      id: task.id,
+      name: task.name.trim() || `Ping ${task.id}`,
+    }))
 }
 
 /** 与 useNodePingDisplay 中 buildPingBars 的配色和悬停文案保持一致 */
@@ -210,34 +162,24 @@ export function buildNodePingLines(
 }
 
 /**
- * 卡片分线路延迟 / 丢包：取后台延迟监测任务列表的前三个，按后台顺序从上到下展示。
- * 所有卡片使用同一组线路；某节点没有某条线路的数据时，该行显示灰色条形与 "-"。
+ * 按 Komari 后台实际分配给该节点的监测任务，取前三个显示延迟和丢包。
+ * 后台任务信息未加载成功时不沿用其他节点的旧任务，避免误报。
  */
 export function useNodePingLines(uuid: MaybeRefOrGetter<string>) {
   const pingStats = useNodePingStats(uuid, { hours: PING_LINES_QUERY_HOURS })
 
   const lineTasks = computed<NodePingLineTask[] | null>(() => {
-    const tasks = pingStats.tasks.value
-    // 共享数据尚未返回时先用上次记住的线路列表
-    if (!tasks)
-      return cachedLineTasks
-    return pickLineTasks(tasks)
+    const assignments = pingStats.assignments.value
+    if (!assignments)
+      return null
+    return pickNodeLineTasks(toValue(uuid), assignments)
   })
-
-  watch(
-    () => pingStats.tasks.value,
-    (tasks) => {
-      if (tasks)
-        persistLineTasks(pickLineTasks(tasks))
-    },
-    { immediate: true },
-  )
 
   const lines = computed<NodePingLine[]>(() => buildNodePingLines(
     lineTasks.value,
     pingStats.perTaskStats.value,
     {
-      loaded: pingStats.tasks.value !== null,
+      loaded: pingStats.assignments.value !== null,
       loading: pingStats.loading.value,
       error: Boolean(pingStats.error.value),
     },
